@@ -43,7 +43,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/lizhijie429/dsh-push-privacy-guard",
-            "commit": "b752f613609a0f285d5c6306c65c14f647323c40"
+            "commit": "756cc68b1a152856e01c83479b8e5ff11ef8c317"
           },
           "engines": {
             "dsh": ">=0.2.1-0 <0.3.0"
