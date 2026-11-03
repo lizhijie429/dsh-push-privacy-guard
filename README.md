@@ -155,8 +155,9 @@ dsh plugin --profile desktop add https://github.com/lizhijie429/dsh-push-privacy
 
 已提交的社区收录：
 
-- [Open Plugin Market（社区插件索引）](https://github.com/polang233/dsh-plugin-index) 收录申请（pinned Git commit `b752f61`，v0.2.1）。
-- [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 精选列表 PR（`data/plugins/lizhijie429__dsh-push-privacy-guard.yml`）。
+- [Open Plugin Market（社区插件索引）收录申请 #216](https://github.com/polang233/dsh-plugin-index/issues/216)（pinned Git commit `b752f61`，v0.2.1）。
+- [awesome-dsh-plugin 精选列表 PR #11727](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/11727)（`data/plugins/lizhijie429__dsh-push-privacy-guard.yml`）。
+- [GitHub Release v0.2.1](https://github.com/lizhijie429/dsh-push-privacy-guard/releases/tag/v0.2.1)（变更说明与安装方式）。
 
 > npm 包尚未发布（需要维护者 npm token）；当前以固定 Git commit 作为市场安装源。索引条目只声明安装参数，实际安装内容以仓库 `package.json` 与 `cordis.patch.yml` 为准。
 
