@@ -130,3 +130,20 @@ test('command report rendering uses masked data only', () => {
   assert.match(scan, /已扫描文件：12 个/)
   assert.match(renderHelp(), /\/privacy-guard remove/)
 })
+
+test('an incomplete scan with no findings gets its own approval wording', () => {
+  const approval = buildFindingsApproval({
+    action: 'push',
+    repo: 'D:/repo',
+    findings: [],
+    incomplete: true,
+    notes: ['diff-too-large'],
+  })
+  assert.match(approval.reason, /scan .* was incomplete/)
+  assert.doesNotMatch(approval.reason, /0 unapproved/)
+  assert.match(approval.displayReason.zh, /未能完整扫描/)
+  assert.match(approval.displayReason.zh, /差异超过扫描大小上限/)
+  assert.doesNotMatch(approval.displayReason.zh, /0 处/)
+  assert.match(approval.displayReason.en, /could not complete/)
+  assert.match(approval.displayReason.en, /Approve: continue/)
+})

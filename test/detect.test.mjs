@@ -13,7 +13,12 @@ test('detects a plain git push', () => {
   assert.equal(op.kind, 'push')
   assert.equal(op.cwd, path.resolve(SESSION_CWD))
   assert.deepEqual(op.positional, [])
-  assert.deepEqual(op.flags, { delete: false, all: false, mirror: false, force: false, tags: false })
+  assert.deepEqual(op.flags, { delete: false, all: false, mirror: false, force: false, tags: false, dryRun: false })
+})
+
+test('detects dry-run pushes', () => {
+  assert.equal(detect('git push --dry-run origin main')[0].flags.dryRun, true)
+  assert.equal(detect('git push -n origin main')[0].flags.dryRun, true)
 })
 
 test('detects push inside compound commands and keeps only one operation', () => {

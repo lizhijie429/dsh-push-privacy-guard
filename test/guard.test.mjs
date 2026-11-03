@@ -370,3 +370,18 @@ test('nothing-to-push passes without asking anything', async () => {
   assert.equal(nextCalled, 1)
   assert.equal(requests.length, 0)
 })
+
+test('dry-run pushes are not scanned or approved', async () => {
+  const config = makeConfig()
+  const { ctx, requests } = makeCtx({ outcomes: ['rejected'] })
+  const { guard, logLines } = makeGuard({ ctx, config, runner: commitRunner() })
+  let nextCalled = 0
+  const decision = await guard.handler(execFor('git push --dry-run origin main'), async () => {
+    nextCalled += 1
+    return { kind: 'allow' }
+  })
+  assert.equal(decision.kind, 'allow')
+  assert.equal(nextCalled, 1)
+  assert.equal(requests.length, 0)
+  assert.ok(logLines.some(line => line.includes('reason=dry-run')))
+})

@@ -8,6 +8,7 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 
 - **提交前检查**：扫描 `git commit` 的暂存区新增内容（`git commit -a` 时按 `git diff HEAD` 覆盖全部已跟踪改动）与 `-m` / `-F` 提交信息。
 - **推送前检查**：只读计算本次 `git push` 真正要上传的提交范围（支持 `git -C`、remote/refspec、`--force`、`--all`、`--mirror`、`--delete`、`gh repo sync`），扫描新增行 + 待推送提交信息。
+- **dry-run 放行**：`git push --dry-run` / `git push -n` 不上传任何内容，直接放行、不打扰。
 - **首次仓库全仓扫描**：某个仓库第一次通过 DSH 推送时询问一次「是否先全仓库扫描」；全仓扫描只覆盖 `HEAD` 里 **git 已跟踪的文件**，`.gitignore` 忽略的内容天然不参与。之后该仓库只检查本次提交/推送内容。
 - **用户授权**：命中未白名单项时调用 `ctx.approval.request()`，在 Web UI 审批面板展示脱敏后的命中清单；批准 = 本次放行 + 入白名单，拒绝/取消 = 阻止命令。
 - **白名单管理**：`/privacy-guard` 斜杠命令（用户专属，不产生模型消息），底层 `state/whitelist.json` 可手改、即时生效。
@@ -150,9 +151,11 @@ dsh plugin --profile web add "file:$env:USERPROFILE\.dsh\plugins\dsh-push-privac
 
 ```powershell
 cd "$env:USERPROFILE\.dsh\plugins\dsh-push-privacy-guard"
-node --test "test/*.test.mjs"
+npm test
 Get-Content state\push-privacy-guard.log -Tail 20
 ```
+
+CI：`.github/workflows/test.yml` 在 `ubuntu-latest` / `windows-latest`（Node 22）上执行 `npm test`（含真实 git 集成用例）。
 
 端到端（需要会话审批策略为 `ask`，即有审批面板可点）：
 
