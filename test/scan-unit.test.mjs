@@ -60,6 +60,11 @@ test('glob helper matches gitignore-style patterns', () => {
   assert.equal(isIgnoredPath('src/a.ts', ['**/node_modules/**']), false)
   assert.equal(isIgnoredPath('docs/x.min.js', ['**/*.min.js']), true)
   assert.equal(globToRegExp('src/**/*.ts').test('src/a/b/c.ts'), true)
+  // `**/dist/**` must not leak into similarly-named directories.
+  assert.equal(isIgnoredPath('prebuild/x.js', ['**/build/**']), false)
+  assert.equal(isIgnoredPath('mydist/x.js', ['**/dist/**']), false)
+  assert.equal(isIgnoredPath('src/build/x.js', ['**/build/**']), true)
+  assert.equal(isIgnoredPath('root.ts', ['**/*.ts']), true)
 })
 
 test('parsePatch reports file, line and added text', () => {
@@ -127,7 +132,7 @@ test('planPush computes base and commits to upload', async () => {
     { match: contains('--symbolic-full-name'), result: ok('origin/dev\n') },
     {
       match: args => args[0] === 'rev-parse' && args.includes('--verify'),
-      result: args => (args[3].endsWith('^') ? ok(`${SHA_C}\n`) : ok(`${SHA_A}\n`)),
+      result: args => (args[args.length - 1].endsWith('^') ? ok(`${SHA_C}\n`) : ok(`${SHA_A}\n`)),
     },
     { match: contains('rev-list'), result: ok(`${SHA_A}\n${SHA_B}\n`) },
   ])
@@ -175,8 +180,8 @@ test('planPush allows deletes and nothing-to-push pushes', async () => {
 
 test('scanPush finds secrets in the planned diff and commit messages', async () => {
   const run = fakeGit([
-    { match: args => args[0] === 'diff', result: ok(diffFor('src/config.ts', 2, [`const key = "${SECRET}"`])) },
-    { match: args => args[0] === 'log', result: ok(`\u001efeat: add phone 13812345678\u001f`) },
+    { match: args => args[0] === 'log' && args.includes('--no-walk'), result: ok(`\u001efeat: add phone 13812345678\u001f`) },
+    { match: args => args[0] === 'log', result: ok(diffFor('src/config.ts', 2, [`const key = "${SECRET}"`])) },
   ])
   const plan = { empty: false, broad: false, headSha: SHA_A, base: SHA_B, commits: [SHA_A], commitCount: 1, incomplete: false, notes: [] }
   const result = await scanPush(run, { plan, rules, config })
@@ -248,6 +253,38 @@ test('scanFullRepo only scans tracked, non-ignored blobs and reports limits', as
   assert.equal(result.filesScanned, 2) // config.ts + binary (read but not matched); ignored & oversized skipped
   assert.equal(result.findings.length, 1)
   assert.equal(result.findings[0].file, 'src/config.ts')
+  // A size-skipped file means the full scan is incomplete and needs approval.
+  assert.equal(result.incomplete, true)
+  assert.ok(result.notes.includes('files-skipped:1'))
+})
+
+test('scanFullRepo reads every blob through one batch call when supported', async () => {
+  const records = [
+    { oid: '1'.repeat(40), size: 40, path: 'src/config.ts' },
+    { oid: '2'.repeat(40), size: 40, path: 'src/other.ts' },
+  ]
+  const lsTree = records.map(record => `100644 blob ${record.oid} ${record.size}\t${record.path}`).join('\u0000') + '\u0000'
+  const batchCalls = []
+  const run = fakeGit([
+    { match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'ls-tree', result: ok(lsTree) },
+    { match: args => args[0] === 'cat-file', result: ok('') },
+  ])
+  const result = await scanFullRepo(run, {
+    rules,
+    config,
+    cwd: 'D:/repo',
+    readBlobs: async ({ oids }) => {
+      batchCalls.push(oids)
+      return new Map([
+        ['1'.repeat(40), Buffer.from(`const key = "${SECRET}"\n`)],
+        ['2'.repeat(40), Buffer.from('clean\n')],
+      ])
+    },
+  })
+  assert.deepEqual(batchCalls, [[records[0].oid, records[1].oid]])
+  assert.equal(result.findings.length, 1)
+  assert.equal(result.findings[0].file, 'src/config.ts')
   assert.equal(result.incomplete, false)
 })
 
@@ -276,4 +313,293 @@ test('parseLsTree ignores non-blob entries and malformed records', () => {
   ].join('\u0000') + '\u0000'
   const entries = parseLsTree(stdout)
   assert.deepEqual(entries.map(entry => entry.path), ['src/a.ts', 'b.ts'])
+})
+
+test('scanCommit covers worktree diff and untracked files after an in-command git add', async () => {
+  const trackedSecret = 'sk-' + 'A1b2C3d4E5f6G7h8I9j0K1l2'.slice(0, 24)
+  const untrackedSecret = 'sk-' + 'Z9y8X7w6V5u4T3s2R1q0P9o8'.slice(0, 24)
+  const run = fakeGit([
+    { match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'diff', result: ok(diffFor('src/tracked.ts', 1, [`const key = "${trackedSecret}"`])) },
+    { match: args => args[0] === 'ls-files', result: ok('new.ts\u0000') },
+  ])
+  const result = await scanCommit(run, {
+    op: {
+      kind: 'commit',
+      cwd: 'D:/repo',
+      flags: { all: false },
+      messages: [],
+      mutation: { indexMutated: true, mayAddUntracked: true, addScopeAll: true, scanIgnored: false, addPaths: [] },
+    },
+    rules,
+    config,
+    readWorkingFile: async () => Buffer.from(`const key = "${untrackedSecret}"\n`),
+  })
+  const files = result.findings.map(finding => finding.file)
+  assert.ok(files.includes('src/tracked.ts'))
+  assert.ok(files.includes('new.ts'))
+  const diffCall = run.calls.find(args => args[0] === 'diff')
+  assert.ok(diffCall.includes('HEAD'))
+})
+
+test('pathspec commits scan the worktree diff limited to the pathspec', async () => {
+  const secret = 'sk-' + 'B2c3D4e5F6g7H8i9J0k1L2m3'.slice(0, 24)
+  const run = fakeGit([
+    { match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'diff', result: ok(diffFor('a.ts', 1, [`const key = "${secret}"`])) },
+  ])
+  const result = await scanCommit(run, {
+    op: { kind: 'commit', cwd: 'D:/repo', flags: { all: false }, messages: [], pathspecs: ['a.ts'], includes: [] },
+    rules,
+    config,
+  })
+  assert.equal(result.findings.length, 1)
+  const diffCall = run.calls.find(args => args[0] === 'diff')
+  assert.ok(diffCall.includes('HEAD'))
+  // Pathspec narrowing is deliberately not used: scan the whole worktree diff.
+  assert.ok(!diffCall.includes('--'))
+})
+
+test('untracked scanning honours the add path prefix and ignorePaths', async () => {
+  const secret = 'sk-' + 'C3d4E5f6G7h8I9j0K1l2M3n4'.slice(0, 24)
+  const seen = []
+  const run = fakeGit([
+    { match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'diff', result: ok('') },
+    { match: args => args[0] === 'ls-files', result: ok('src/new.ts\u0000other.ts\u0000src/skip.min.js\u0000') },
+  ])
+  const result = await scanCommit(run, {
+    op: {
+      kind: 'commit',
+      cwd: 'D:/repo',
+      flags: { all: false },
+      messages: [],
+      mutation: { indexMutated: true, mayAddUntracked: true, addScopeAll: false, scanIgnored: false, addPaths: ['src'] },
+    },
+    rules,
+    config,
+    readWorkingFile: async file => {
+      seen.push(file)
+      return Buffer.from(`const key = "${secret}"\n`)
+    },
+  })
+  assert.deepEqual(seen.map(file => file.replace(/\\/g, '/')), ['D:/repo/src/new.ts'])
+  assert.ok(result.findings.some(finding => finding.file === 'src/new.ts'))
+  assert.ok(!result.findings.some(finding => finding.file === 'other.ts'))
+})
+
+test('unreadable or oversized untracked files mark the scan incomplete', async () => {
+  const run = fakeGit([
+    { match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'diff', result: ok('') },
+    { match: args => args[0] === 'ls-files', result: ok('big.bin\u0000') },
+  ])
+  const result = await scanCommit(run, {
+    op: {
+      kind: 'commit',
+      cwd: 'D:/repo',
+      flags: { all: false },
+      messages: [],
+      mutation: { indexMutated: true, mayAddUntracked: true, addScopeAll: true, scanIgnored: false, addPaths: [] },
+    },
+    rules,
+    config,
+    readWorkingFile: async () => null,
+  })
+  assert.equal(result.incomplete, true)
+  assert.ok(result.notes.includes('files-skipped:1'))
+})
+
+test('ignorePaths filters diff findings', async () => {
+  const secret = 'sk-' + 'D4e5F6g7H8i9J0k1L2m3N4o5'.slice(0, 24)
+  const run = fakeGit([
+    { match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'diff', result: ok(diffFor('tests/fixtures/data.ts', 1, [`const key = "${secret}"`])) },
+  ])
+  const custom = { ...config, ignorePaths: [...config.ignorePaths, '**/fixtures/**'] }
+  const result = await scanCommit(run, { op: { kind: 'commit', cwd: 'D:/repo', flags: { all: false }, messages: [] }, rules, config: custom })
+  assert.equal(result.findings.length, 0)
+})
+
+test('scanText scans very long lines in overlapping chunks', () => {
+  const secret = 'sk-' + 'J1k2L3m4N5o6P7q8R9s0T1u2'.slice(0, 24)
+  const result = scanText(`${'a'.repeat(20000)} ${secret}`, { file: 'long.ts', rules, config })
+  assert.ok(result.findings.some(finding => finding.ruleId === 'openai-key'))
+})
+
+test('scanPush scans tag object messages listed in the plan', async () => {
+  const secret = 'sk-' + 'K1l2M3n4O5p6Q7r8S9t0U1v2'.slice(0, 24)
+  const run = fakeGit([
+    { match: args => args[0] === 'log', result: ok('') },
+    { match: args => args[0] === 'for-each-ref', result: ok(`release note ${secret}\n`) },
+  ])
+  const result = await scanPush(run, {
+    plan: {
+      empty: false,
+      mode: 'push',
+      broad: false,
+      commits: [],
+      base: EMPTY_TREE,
+      headSha: SHA_A,
+      notes: [],
+      tagRefs: ['v1'],
+    },
+    rules,
+    config,
+  })
+  assert.ok(result.findings.some(finding => finding.file === '<tag message: v1>' && finding.ruleId === 'openai-key'))
+})
+
+test('planPush lists local tags for --tags pushes', async () => {
+  const run = fakeGit([
+    { match: contains('remote'), result: ok('origin\n') },
+    { match: args => args[0] === 'for-each-ref', result: ok('v1\nv2\n') },
+    { match: args => args[0] === 'rev-parse' && args.includes('--abbrev-ref'), result: ok('main\n') },
+    { match: contains('--symbolic-full-name'), result: ok('origin/main\n') },
+    { match: args => args[0] === 'rev-parse' && args.includes('--verify'), result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'rev-list', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'diff', result: ok('') },
+    { match: args => args[0] === 'log', result: ok('') },
+  ])
+  const op = { kind: 'push', flags: { tags: true }, positional: ['origin'], cwd: 'D:/repo' }
+  const plan = await planPush(run, { op, config })
+  assert.deepEqual([...plan.tagRefs].sort(), ['v1', 'v2'])
+})
+
+test('scanPush walks every commit in the range, not just the net diff', async () => {
+  const run = fakeGit([
+    { match: args => args[0] === 'log' && args.includes('--no-walk'), result: ok('') },
+    { match: args => args[0] === 'log', result: ok(diffFor('leak.txt', 1, [`const key = "${SECRET}"`])) },
+  ])
+  const plan = { empty: false, broad: false, headSha: SHA_A, base: SHA_B, commits: [SHA_A, SHA_B], commitCount: 2, incomplete: false, notes: [] }
+  const result = await scanPush(run, { plan, rules, config })
+  assert.ok(result.findings.some(finding => finding.file === 'leak.txt'))
+  const logCall = run.calls.find(args => args[0] === 'log' && args.includes('-p'))
+  assert.ok(logCall.includes(`${SHA_B}..${SHA_A}`))
+})
+
+test('planPush plans every explicit refspec instead of only the first', async () => {
+  const run = fakeGit([
+    { match: contains('remote'), result: ok('origin\n') },
+    {
+      match: args => args[0] === 'rev-parse' && args.includes('--verify'),
+      result: args => (args[args.length - 1].endsWith('^') ? ok(`${SHA_B}\n`) : ok(`${SHA_A}\n`)),
+    },
+    { match: args => args[0] === 'rev-list', result: ok(`${SHA_A}\n`) },
+  ])
+  const op = { kind: 'push', flags: {}, positional: ['origin', 'main', 'dev'], cwd: 'D:/repo' }
+  const plan = await planPush(run, { op, config })
+  assert.equal(plan.empty, false)
+  assert.equal(plan.broad, true)
+  assert.deepEqual(plan.branches.map(range => range.headRef), ['main', 'dev'])
+})
+
+test('planPush expands wildcard refspecs', async () => {
+  const run = fakeGit([
+    { match: contains('remote'), result: ok('origin\n') },
+    { match: args => args[0] === 'for-each-ref', result: ok('refs/heads/main\nrefs/heads/dev\n') },
+    {
+      match: args => args[0] === 'rev-parse' && args.includes('--verify'),
+      result: args => (args[args.length - 1].endsWith('^') ? ok(`${SHA_B}\n`) : ok(`${SHA_A}\n`)),
+    },
+    { match: args => args[0] === 'rev-list', result: ok(`${SHA_A}\n`) },
+  ])
+  const op = { kind: 'push', flags: {}, positional: ['origin', 'refs/heads/*:refs/heads/*'], cwd: 'D:/repo' }
+  const plan = await planPush(run, { op, config })
+  assert.equal(plan.broad, true)
+  assert.deepEqual(plan.branches.map(range => range.headRef), ['refs/heads/main', 'refs/heads/dev'])
+})
+
+test('planPush fails closed when git queries fail', async () => {
+  const failed = fakeGit([
+    { match: contains('remote'), result: ok('origin\n') },
+    { match: args => args[0] === 'rev-parse', result: { ok: false, stderr: 'fatal: unable to read tree' } },
+  ])
+  const plan = await planPush(failed, { op: { kind: 'push', flags: {}, positional: [] }, config })
+  assert.equal(plan.empty, false)
+  assert.ok(typeof plan.error === 'string')
+
+  const missing = fakeGit([
+    { match: contains('remote'), result: ok('origin\n') },
+    { match: args => args[0] === 'rev-parse', result: { ok: false, stderr: 'fatal: Needed a single revision' } },
+  ])
+  const noHead = await planPush(missing, { op: { kind: 'push', flags: {}, positional: [] }, config })
+  assert.equal(noHead.empty, true)
+  assert.equal(noHead.reason, 'no-head')
+})
+
+test('scanPush fails closed when commit messages cannot be read', async () => {
+  const run = fakeGit([
+    { match: args => args[0] === 'log' && args.includes('--no-walk'), result: { ok: false, stderr: 'fatal: bad object' } },
+    { match: args => args[0] === 'log', result: ok('') },
+  ])
+  const plan = { empty: false, broad: false, headSha: SHA_A, base: SHA_B, commits: [SHA_A], commitCount: 1, incomplete: false, notes: [] }
+  const result = await scanPush(run, { plan, rules, config })
+  assert.ok(typeof result.error === 'string')
+})
+
+test('commit messages from stdin, shell expansion or unreadable files are incomplete', async () => {
+  const base = { kind: 'commit', cwd: 'D:/repo', flags: { all: false }, pathspecs: [], includes: [] }
+
+  const fromStdin = await scanCommit(fakeGit([{ match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) }, { match: args => args[0] === 'diff', result: ok('') }]), {
+    op: { ...base, messages: [], messageFile: '-' },
+    rules,
+    config,
+  })
+  assert.equal(fromStdin.incomplete, true)
+  assert.ok(fromStdin.notes.includes('message-from-stdin'))
+
+  const dynamic = await scanCommit(fakeGit([{ match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) }, { match: args => args[0] === 'diff', result: ok('') }]), {
+    op: { ...base, messages: ['fix $(cat secret.txt)'] },
+    rules,
+    config,
+  })
+  assert.equal(dynamic.incomplete, true)
+  assert.ok(dynamic.notes.includes('message-dynamic'))
+
+  const unreadable = await scanCommit(fakeGit([{ match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) }, { match: args => args[0] === 'diff', result: ok('') }]), {
+    op: { ...base, messages: [], messageFile: 'msg.txt' },
+    rules,
+    config,
+    readTextFile: async () => {
+      throw new Error('too large')
+    },
+  })
+  assert.equal(unreadable.incomplete, true)
+  assert.ok(unreadable.notes.includes('message-file-unreadable'))
+})
+
+test('forced git add paths are not dropped by ignorePaths', async () => {
+  const secret = 'sk-' + 'N1o2P3q4R5s6T7u8V9w0X1y2'.slice(0, 24)
+  const run = fakeGit([
+    { match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'diff', result: ok('') },
+    { match: args => args[0] === 'ls-files', result: ok('dist/secret.js\u0000') },
+  ])
+  const custom = { ...config, ignorePaths: [...config.ignorePaths, '**/dist/**'] }
+  const result = await scanCommit(run, {
+    op: {
+      kind: 'commit',
+      cwd: 'D:/repo',
+      flags: { all: false },
+      messages: [],
+      mutation: { indexMutated: true, mayAddUntracked: true, addScopeAll: true, scanIgnored: true, addPaths: [] },
+    },
+    rules,
+    config: custom,
+    readWorkingFile: async () => Buffer.from(`const key = "${secret}"\n`),
+  })
+  assert.ok(result.findings.some(finding => finding.file === 'dist/secret.js'))
+  const listCall = run.calls.find(args => args[0] === 'ls-files')
+  assert.ok(!listCall.includes('--exclude-standard'))
+})
+
+test('scanFullRepo lists the whole tree regardless of cwd', async () => {
+  const run = fakeGit([
+    { match: args => args[0] === 'rev-parse', result: ok(`${SHA_A}\n`) },
+    { match: args => args[0] === 'ls-tree', result: ok('') },
+  ])
+  await scanFullRepo(run, { rules, config, cwd: 'D:/repo/src' })
+  const treeCall = run.calls.find(args => args[0] === 'ls-tree')
+  assert.ok(treeCall.includes('--full-tree'))
 })

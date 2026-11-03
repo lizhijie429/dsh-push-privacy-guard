@@ -10,6 +10,8 @@ test('defaults are complete and absolute paths resolve against the plugin dir', 
   assert.equal(config.enabled, true)
   assert.equal(config.interceptCommit, true)
   assert.equal(config.interceptPush, true)
+  assert.equal(config.unresolvedRepo, 'deny')
+  assert.equal(config.persistentShellCommits, 'deny')
   assert.equal(config.fullScanOnFirstPush, 'ask')
   assert.equal(config.whitelistOnApprove, true)
   assert.equal(config.requireApprovalOnIncompleteScan, true)
@@ -33,13 +35,14 @@ test('custom relative paths resolve against the plugin dir; absolute paths stay'
 
 test('invalid enum and booleans fall back with warnings', () => {
   const config = normalizeConfig(
-    { fullScanOnFirstPush: 'sometimes', enabled: 'no', whitelistOnApprove: 'yes' },
+    { fullScanOnFirstPush: 'sometimes', enabled: 'no', whitelistOnApprove: 'yes', unresolvedRepo: 'maybe' },
     PLUGIN_DIR,
   )
   assert.equal(config.fullScanOnFirstPush, 'ask')
+  assert.equal(config.unresolvedRepo, 'deny')
   assert.equal(config.enabled, false) // "no" is a recognizable false-y string
   assert.equal(config.whitelistOnApprove, true) // "yes" is a recognizable true-y string
-  assert.equal(config.warnings.length, 3)
+  assert.equal(config.warnings.length, 4)
 })
 
 test('invalid numbers fall back to defaults with warnings', () => {

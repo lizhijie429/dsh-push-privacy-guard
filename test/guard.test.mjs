@@ -79,11 +79,12 @@ function pushRunner({ diff = '', messages = '', lsTree = '', blobs = {}, revList
     { match: contains('--symbolic-full-name'), result: ok('origin/main\n') },
     {
       match: args => args[0] === 'rev-parse' && args.includes('--verify'),
-      result: args => (args[3].endsWith('^') ? ok(`${PARENT}\n`) : ok(`${HEAD}\n`)),
+      result: args => (args[args.length - 1].endsWith('^') ? ok(`${PARENT}\n`) : ok(`${HEAD}\n`)),
     },
     { match: args => args[0] === 'rev-list', result: ok(revList) },
+    { match: args => args[0] === 'log' && args.includes('--no-walk'), result: ok(messages) },
+    { match: args => args[0] === 'log', result: ok(diff) },
     { match: args => args[0] === 'diff', result: ok(diff) },
-    { match: args => args[0] === 'log', result: ok(messages) },
     { match: args => args[0] === 'ls-tree', result: ok(lsTree) },
     { match: args => args[0] === 'cat-file', result: args => ok(blobs[args[2]] ?? '') },
   ])
@@ -115,7 +116,7 @@ function makeCtx({ outcomes = ['allowed-once'], withApproval = true, sessionCwd 
   return { ctx, requests }
 }
 
-function makeGuard({ ctx, config, runner, readTextFile }) {
+function makeGuard({ ctx, config, runner, readTextFile, readWorkingFile }) {
   const logLines = []
   const guard = createGuard({
     ctx,
@@ -124,6 +125,7 @@ function makeGuard({ ctx, config, runner, readTextFile }) {
     log: line => logLines.push(line),
     runGitFactory: () => runner,
     readTextFile,
+    readWorkingFile,
     now: () => new Date('2026-11-03T00:00:00.000Z'),
   })
   return { guard, logLines }
@@ -384,4 +386,155 @@ test('dry-run pushes are not scanned or approved', async () => {
   assert.equal(nextCalled, 1)
   assert.equal(requests.length, 0)
   assert.ok(logLines.some(line => line.includes('reason=dry-run')))
+})
+
+test('commit after an in-command git add is still scanned and denied', async () => {
+  const config = makeConfig()
+  const { ctx, requests } = makeCtx({ outcomes: ['rejected'] })
+  const secret = 'sk-' + 'E5f6G7h8I9j0K1l2M3n4O5p6'.slice(0, 24)
+  const run = fakeGit([
+    { match: contains('rev-parse', '--show-toplevel'), result: ok('D:/repo\n') },
+    { match: args => args[0] === 'rev-parse' && args.includes('--verify'), result: ok(`${HEAD}\n`) },
+    { match: args => args[0] === 'diff', result: ok('') },
+    { match: args => args[0] === 'ls-files', result: ok('new.ts\u0000') },
+  ])
+  const { guard } = makeGuard({
+    ctx,
+    config,
+    runner: run,
+    readWorkingFile: async () => Buffer.from(`const key = "${secret}"\n`),
+  })
+  let nextCalled = 0
+  const decision = await guard.handler(execFor('git add .; git commit -m "x"'), async () => {
+    nextCalled += 1
+    return { kind: 'allow' }
+  })
+  assert.equal(nextCalled, 0)
+  assert.equal(decision.kind, 'deny')
+  assert.match(decision.reason, /did not authorize/)
+  assert.equal(requests.length, 1)
+})
+
+test('recognised commit/push in an unresolved repository is denied by default', async () => {
+  const config = makeConfig()
+  const { ctx } = makeCtx()
+  const notRepo = fakeGit([
+    { match: contains('rev-parse', '--show-toplevel'), result: { ok: false, code: 128, stdout: '', stderr: 'not a repo' } },
+  ])
+  const { guard, logLines } = makeGuard({ ctx, config, runner: notRepo })
+  let nextCalled = 0
+  const decision = await guard.handler(execFor('cd $repo; git commit -m x'), async () => {
+    nextCalled += 1
+    return { kind: 'allow' }
+  })
+  assert.equal(nextCalled, 0)
+  assert.equal(decision.kind, 'deny')
+  assert.match(decision.reason, /repository could not be located/)
+  assert.match(decision.reason, /unresolved/)
+  assert.ok(logLines.some(line => line.includes('reason=repo-unresolved')))
+})
+
+test('unresolvedRepo=allow restores the old pass-through behaviour', async () => {
+  const config = makeConfig({ unresolvedRepo: 'allow' })
+  const { ctx } = makeCtx()
+  const notRepo = fakeGit([
+    { match: contains('rev-parse', '--show-toplevel'), result: { ok: false, code: 128, stdout: '', stderr: 'not a repo' } },
+  ])
+  const { guard } = makeGuard({ ctx, config, runner: notRepo })
+  let nextCalled = 0
+  const decision = await guard.handler(execFor('git commit -m x'), async () => {
+    nextCalled += 1
+    return { kind: 'allow' }
+  })
+  assert.equal(decision.kind, 'allow')
+  assert.equal(nextCalled, 1)
+})
+
+test('a literal non-repository cwd is denied by default too', async () => {
+  const config = makeConfig()
+  const { ctx } = makeCtx()
+  const notRepo = fakeGit([
+    { match: contains('rev-parse', '--show-toplevel'), result: { ok: false, code: 128, stdout: '', stderr: 'not a repo' } },
+  ])
+  const { guard } = makeGuard({ ctx, config, runner: notRepo })
+  const decision = await guard.handler(execFor('git push origin main'), async () => ({ kind: 'allow' }))
+  assert.equal(decision.kind, 'deny')
+  assert.match(decision.reason, /repository could not be located/)
+})
+
+test('commit options with values do not disable the staged-index scan', async () => {
+  const config = makeConfig()
+  const secret = 'sk-' + 'K1l2M3n4O5p6Q7r8S9t0U1v2'.slice(0, 24)
+  for (const command of [
+    'git commit -C HEAD',
+    'git commit -c HEAD',
+    'git commit --fixup HEAD',
+    'git commit -m "msg" --trailer "Co-authored-by: 13812345678 <ops@' + 'corp.local>"',
+    'git commit --only -m "msg"',
+  ]) {
+    const { ctx, requests } = makeCtx({ outcomes: ['rejected'] })
+    const { guard } = makeGuard({
+      ctx,
+      config,
+      runner: commitRunner({ diff: patchFor('a.ts', 1, [`const key = "${secret}"`]) }),
+    })
+    const decision = await guard.handler(execFor(command), async () => ({ kind: 'allow' }))
+    assert.equal(decision.kind, 'deny', `expected deny for: ${command}`)
+    assert.equal(requests.length >= 1, true, `expected approval ask for: ${command}`)
+  }
+})
+
+test('commits sent to a persistent terminal are denied by default', async () => {  const config = makeConfig()
+  const { ctx, requests } = makeCtx()
+  const { guard, logLines } = makeGuard({ ctx, config, runner: commitRunner() })
+  const exec = { ...execFor('git commit -m x'), name: 'terminal_send', arguments: { text: 'git commit -m x' } }
+  const decision = await guard.handler(exec, async () => ({ kind: 'allow' }))
+  assert.equal(decision.kind, 'deny')
+  assert.match(decision.reason, /persistent terminal/)
+  assert.equal(requests.length, 0)
+  assert.ok(logLines.some(line => line.includes('reason=persistent-shell')))
+})
+
+test('persistentShellCommits=allow keeps the previous best-effort scanning', async () => {
+  const config = makeConfig({ persistentShellCommits: 'allow' })
+  const { ctx } = makeCtx()
+  const { guard } = makeGuard({ ctx, config, runner: commitRunner({ diff: patchFor('a.ts', 1, ['clean line']) }) })
+  const exec = { ...execFor('git commit -m x'), name: 'terminal_send', arguments: { text: 'git commit -m x' } }
+  let nextCalled = 0
+  const decision = await guard.handler(exec, async () => {
+    nextCalled += 1
+    return { kind: 'allow' }
+  })
+  assert.equal(decision.kind, 'allow')
+  assert.equal(nextCalled, 1)
+})
+
+test('a first push without an approval channel is not remembered as initialised', async () => {
+  const config = makeConfig()
+  const { ctx, requests } = makeCtx({ outcomes: ['unavailable'] })
+  const { guard } = makeGuard({ ctx, config, runner: pushRunner() })
+  const exec = execFor('git push origin main')
+  const first = await guard.handler(exec, async () => ({ kind: 'allow' }))
+  assert.equal(first.kind, 'allow')
+  assert.equal(isInitialized(loadRepoState(config.repoStateFile), 'D:/repo'), false)
+  const second = await guard.handler(exec, async () => ({ kind: 'allow' }))
+  assert.equal(second.kind, 'allow')
+  assert.equal(requests.length, 2)
+})
+
+test('gh repo sync outside a repository is allowed (it needs no local checkout)', async () => {
+  const config = makeConfig()
+  const { ctx } = makeCtx()
+  const notRepo = fakeGit([
+    { match: contains('rev-parse', '--show-toplevel'), result: { ok: false, code: 128, stdout: '', stderr: 'not a repo' } },
+  ])
+  const { guard, logLines } = makeGuard({ ctx, config, runner: notRepo })
+  let nextCalled = 0
+  const decision = await guard.handler(execFor('gh repo sync owner/fork'), async () => {
+    nextCalled += 1
+    return { kind: 'allow' }
+  })
+  assert.equal(decision.kind, 'allow')
+  assert.equal(nextCalled, 1)
+  assert.ok(logLines.some(line => line.includes('reason=no-local-repo')))
 })

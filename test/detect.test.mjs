@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import os from 'node:os'
 import path from 'node:path'
 import { detectOperations } from '../lib/detect.mjs'
 
@@ -77,6 +78,82 @@ test('detects commit and its message sources', () => {
   assert.deepEqual(editor.messages, [])
 })
 
+test('marks commits that follow an index mutation in the same command', () => {
+  const all = detect('git add .; git commit -m "x"')[0]
+  assert.equal(all.mutation.indexMutated, true)
+  assert.equal(all.mutation.mayAddUntracked, true)
+  assert.equal(all.mutation.addScopeAll, true)
+
+  const scoped = detect('git add src/a.ts; git commit -m x')[0]
+  assert.equal(scoped.mutation.indexMutated, true)
+  assert.equal(scoped.mutation.addScopeAll, false)
+  assert.deepEqual(scoped.mutation.addPaths, ['src/a.ts'])
+
+  const update = detect('git add -u; git commit -m x')[0]
+  assert.equal(update.mutation.indexMutated, true)
+  assert.equal(update.mutation.mayAddUntracked, false)
+
+  assert.equal(detect('git status; git commit -m x')[0].mutation, undefined)
+  assert.equal(detect('git commit -m x; git add .')[0].mutation, undefined)
+
+  const otherRepo = detect('git -C repo add .; git -C repo commit -m x')[0]
+  assert.equal(otherRepo.mutation.indexMutated, true)
+})
+
+test('parses commit pathspecs and -i/--include paths', () => {
+  const pathspec = detect('git commit a.ts b.ts -m x')[0]
+  assert.deepEqual(pathspec.pathspecs, ['a.ts', 'b.ts'])
+  assert.deepEqual(pathspec.includes, [])
+
+  const afterDash = detect('git commit -- a.ts')[0]
+  assert.deepEqual(afterDash.pathspecs, ['a.ts'])
+
+  const includeShort = detect('git commit -i a.ts -m x')[0]
+  assert.deepEqual(includeShort.pathspecs, ['a.ts'])
+  assert.equal(includeShort.flags.worktreePaths, true)
+  assert.deepEqual(includeShort.messages, ['x'])
+
+  const includeLong = detect('git commit --include a.ts --message x')[0]
+  assert.deepEqual(includeLong.pathspecs, ['a.ts'])
+  assert.equal(includeLong.flags.worktreePaths, true)
+  assert.deepEqual(includeLong.messages, ['x'])
+})
+
+test('option values are never mistaken for pathspecs', () => {
+  const reuse = detect('git commit -C HEAD')[0]
+  assert.deepEqual(reuse.pathspecs, [])
+  assert.equal(reuse.flags.reuseMessage, true)
+
+  const reedit = detect('git commit -c HEAD')[0]
+  assert.deepEqual(reedit.pathspecs, [])
+  assert.equal(reedit.flags.reuseMessage, true)
+
+  const fixup = detect('git commit --fixup HEAD')[0]
+  assert.deepEqual(fixup.pathspecs, [])
+  assert.equal(fixup.flags.fixup, true)
+
+  const trailer = detect(
+    'git commit -m "msg" --trailer "Co-authored-by: 13812345678 <ops@' + 'corp.local>"',
+  )[0]
+  assert.deepEqual(trailer.pathspecs, [])
+  assert.ok(trailer.messages.some(message => message.includes('13812345678')))
+
+  const fromFile = detect('git commit -m msg --pathspec-from-file paths.txt')[0]
+  assert.deepEqual(fromFile.pathspecs, [])
+  assert.equal(fromFile.pathspecFromFile, 'paths.txt')
+  assert.equal(fromFile.flags.worktreePaths, true)
+
+  const attachedMessage = detect('git commit -m"fix the bug"')[0]
+  assert.deepEqual(attachedMessage.messages, ['fix the bug'])
+
+  const only = detect('git commit --only -m "msg" file.ts')[0]
+  assert.deepEqual(only.messages, ['msg'])
+  assert.deepEqual(only.pathspecs, ['file.ts'])
+
+  const booleanLong = detect('git commit --no-gpg-sign --quiet file.ts')[0]
+  assert.deepEqual(booleanLong.pathspecs, ['file.ts'])
+})
+
 test('detects gh repo sync but not unrelated gh subcommands', () => {
   assert.deepEqual(kinds('gh repo sync'), ['sync'])
   assert.deepEqual(kinds('gh pr create --fill'), [])
@@ -123,4 +200,36 @@ test('terminal_send text is inspected as a command line', () => {
     sessionCwd: SESSION_CWD,
   })
   assert.equal(ops[0].kind, 'push')
+})
+
+test('marks operations whose repository directory depends on shell expansion', () => {
+  const variable = detect('$repo="x"; cd $repo; git commit -m x')[0]
+  assert.equal(variable.cwdUnresolved, true)
+
+  const literal = detect('cd sub; git commit -m x')[0]
+  assert.equal(literal.cwdUnresolved, false)
+
+  const gitC = detect('git -C $repo push')[0]
+  assert.equal(gitC.cwdUnresolved, true)
+
+  const workdir = detectOperations({
+    tool: 'pwsh',
+    args: { command: 'git push', workdir: '$DIR' },
+    sessionCwd: SESSION_CWD,
+  })[0]
+  assert.equal(workdir.cwdUnresolved, true)
+
+  const absolute = process.platform === 'win32' ? 'D:/abs' : '/abs'
+  const afterAbsolute = detect(`cd $repo; cd ${absolute}; git commit -m x`)[0]
+  assert.equal(afterAbsolute.cwdUnresolved, false)
+})
+
+test('marks GIT_DIR/environment overrides and expands a literal ~', () => {
+  assert.equal(detect('GIT_DIR=D:/other/.git git push')[0].cwdUnresolved, true)
+  assert.equal(detect('GIT_WORK_TREE=D:/other git commit -m x')[0].cwdUnresolved, true)
+  assert.equal(detect('git --git-dir=D:/other/.git push')[0].cwdUnresolved, true)
+  assert.equal(detect('git --work-tree D:/other push')[0].cwdUnresolved, true)
+
+  const expanded = detect('cd ~/repo; git push')[0]
+  assert.equal(expanded.cwd, path.resolve(path.join(os.homedir(), 'repo')))
 })

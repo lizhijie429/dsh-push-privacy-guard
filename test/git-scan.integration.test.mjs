@@ -10,10 +10,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { normalizeConfig } from '../lib/config.mjs'
 import { compileRules } from '../lib/rules.mjs'
-import { createGitRunner } from '../lib/git.mjs'
+import { createGitRunner, readBlobsBatch } from '../lib/git.mjs'
 import { loadWhitelist } from '../lib/whitelist.mjs'
 import { isInitialized, loadRepoState } from '../lib/repo-state.mjs'
 import { createGuard } from '../lib/guard.mjs'
+import { detectOperations } from '../lib/detect.mjs'
 import {
   EMPTY_TREE,
   detectRepo,
@@ -251,3 +252,195 @@ test('real git: first push records the repository and asks the full-scan questio
   assert.match(requests[0].displayReason.zh, /首次通过 DSH 推送/)
   assert.equal(isInitialized(loadRepoState(config.repoStateFile), repo), true)
 })
+
+const readWorkingFile = async (file, maxBytes) => {
+  const stat = fs.statSync(file)
+  if (stat.size > maxBytes) return null
+  return fs.readFileSync(file)
+}
+
+test('real git: an in-command git add is covered by worktree and untracked scanning', async () => {
+  const { repo, run } = await createRepository('addcommit')
+  const config = makeConfig('addcommit')
+  const rules = compileRules(config)
+  fs.writeFileSync(path.join(repo, 'tracked.ts'), 'export const a = 1\n', 'utf8')
+  await gitOk(run, ['add', '.'])
+  await gitOk(run, ['commit', '-q', '-m', 'init'])
+
+  const secret = 'sk-' + 'G1h2J3k4L5m6N7o8P9q0R1s2'.slice(0, 24)
+  fs.writeFileSync(path.join(repo, 'untracked-secret.ts'), `const key = "${secret}"\n`, 'utf8')
+  const [op] = detectOperations({
+    tool: 'pwsh',
+    args: { command: 'git add .; git commit -m "add files"' },
+    sessionCwd: repo,
+  })
+  assert.ok(op.mutation?.indexMutated)
+  const result = await scanCommit(run, { op, rules, config, readWorkingFile })
+  assert.ok(result.findings.some(finding => finding.file === 'untracked-secret.ts'))
+  assert.equal(result.incomplete, false)
+
+  // The real guard denies this command shape instead of letting git add+commit through.
+  const ctx = {
+    get(name) {
+      if (name === 'approval') return { request: async () => 'rejected' }
+      if (name === 'workingDirectory') return { get: () => repo }
+      return undefined
+    },
+    on() {},
+    effect() {},
+    inject() {},
+    logger: { warn() {} },
+  }
+  const guard = createGuard({
+    ctx,
+    config,
+    rules,
+    log: () => {},
+    runGitFactory: options => createGitRunner(options),
+  })
+  const decision = await guard.handler(
+    {
+      name: 'pwsh',
+      callId: 'call-1',
+      agent: { session: {} },
+      signal: new AbortController().signal,
+      arguments: { command: 'git add .; git commit -m "add files"' },
+    },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(decision.kind, 'deny')
+})
+
+test('real git: pathspec commits scan the worktree content', async () => {
+  const { repo, run } = await createRepository('pathspec')
+  const config = makeConfig('pathspec')
+  const rules = compileRules(config)
+  fs.writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n', 'utf8')
+  await gitOk(run, ['add', '.'])
+  await gitOk(run, ['commit', '-q', '-m', 'init'])
+
+  const secret = 'sk-' + 'H1i2J3k4L5m6N7o8P9q0R1s2'.slice(0, 24)
+  fs.writeFileSync(path.join(repo, 'a.ts'), `export const a = "${secret}"\n`, 'utf8')
+  const [op] = detectOperations({
+    tool: 'pwsh',
+    args: { command: 'git commit a.ts -m "update a"' },
+    sessionCwd: repo,
+  })
+  assert.deepEqual(op.pathspecs, ['a.ts'])
+  const result = await scanCommit(run, { op, rules, config })
+  assert.ok(result.findings.some(finding => finding.file === 'a.ts' && finding.ruleId === 'openai-key'))
+})
+
+test('real git: ignorePaths excludes diff findings', async () => {
+  const { repo, run } = await createRepository('ignorepaths')
+  const config = { ...makeConfig('ignorepaths'), ignorePaths: ['**/fixtures/**'] }
+  const rules = compileRules(config)
+  fs.mkdirSync(path.join(repo, 'tests', 'fixtures'), { recursive: true })
+  fs.writeFileSync(path.join(repo, 'tests', 'fixtures', 'data.ts'), 'export const data = 1\n', 'utf8')
+  await gitOk(run, ['add', '.'])
+  await gitOk(run, ['commit', '-q', '-m', 'init'])
+
+  const secret = 'sk-' + 'I1j2K3l4M5n6O7p8Q9r0S1t2'.slice(0, 24)
+  fs.writeFileSync(path.join(repo, 'tests', 'fixtures', 'data.ts'), `export const data = "${secret}"\n`, 'utf8')
+  await gitOk(run, ['add', '.'])
+  const result = await scanCommit(run, {
+    op: { kind: 'commit', cwd: repo, flags: { all: false }, messages: [] },
+    rules,
+    config,
+  })
+  assert.equal(result.findings.filter(finding => finding.file.startsWith('tests/fixtures')).length, 0)
+})
+
+test('real git: annotated tag messages are scanned for --tags pushes', async () => {
+  const { repo, run } = await createRepository('tagpush')
+  const config = makeConfig('tagpush')
+  const rules = compileRules(config)
+  fs.writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n', 'utf8')
+  await gitOk(run, ['add', '.'])
+  await gitOk(run, ['commit', '-q', '-m', 'init'])
+  const secret = 'sk-' + 'L1m2N3o4P5q6R7s8T9u0V1w2'.slice(0, 24)
+  await gitOk(run, ['tag', '-a', 'v1', '-m', `release note ${secret}`])
+  await gitOk(run, ['remote', 'add', 'origin', repo])
+
+  const [op] = detectOperations({
+    tool: 'pwsh',
+    args: { command: 'git push --tags origin' },
+    sessionCwd: repo,
+  })
+  const plan = await planPush(run, { op, config })
+  assert.ok(Array.isArray(plan.tagRefs) && plan.tagRefs.includes('v1'))
+  const result = await scanPush(run, { plan, rules, config })
+  assert.ok(result.findings.some(finding => finding.file === '<tag message: v1>' && finding.ruleId === 'openai-key'))
+})
+
+test('real git: readBlobsBatch streams all requested blobs in one process', async () => {
+  const { repo, run } = await createRepository('batch')
+  const secret = 'sk-' + 'M1n2O3p4Q5r6S7t8U9v0W1x2'.slice(0, 24)
+  fs.writeFileSync(path.join(repo, 'a.ts'), `export const a = "${secret}"\n`, 'utf8')
+  fs.writeFileSync(path.join(repo, 'b.ts'), 'export const b = 2\n', 'utf8')
+  await gitOk(run, ['add', '.'])
+  await gitOk(run, ['commit', '-q', '-m', 'init'])
+  const oids = []
+  for (const file of ['a.ts', 'b.ts']) {
+    const result = await run(['rev-parse', `HEAD:${file}`])
+    assert.equal(result.ok, true)
+    oids.push(result.stdout.trim())
+  }
+  const blobs = await readBlobsBatch({ cwd: repo, oids })
+  assert.equal(blobs.size, 2)
+  assert.match(blobs.get(oids[0]).toString('utf8'), /sk-/)
+  assert.match(blobs.get(oids[1]).toString('utf8'), /export const b/)
+})
+
+test('real git: secrets in intermediate commits are scanned even when later deleted', async () => {
+  const { repo, run } = await createRepository('intermediate')
+  const config = makeConfig('intermediate')
+  const rules = compileRules(config)
+  const secret = 'sk-' + 'O1p2Q3r4S5t6U7v8W9x0Y1z2'.slice(0, 24)
+  fs.writeFileSync(path.join(repo, 'leak.ts'), `const key = "${secret}"\n`, 'utf8')
+  await gitOk(run, ['add', '.'])
+  await gitOk(run, ['commit', '-q', '-m', 'add leak'])
+  await gitOk(run, ['rm', '-q', 'leak.ts'])
+  await gitOk(run, ['commit', '-q', '-m', 'remove leak'])
+  await gitOk(run, ['remote', 'add', 'origin', repo])
+
+  const [op] = detectOperations({ tool: 'pwsh', args: { command: 'git push origin main' }, sessionCwd: repo })
+  const plan = await planPush(run, { op, config })
+  assert.equal(plan.commitCount, 2)
+  const result = await scanPush(run, { plan, rules, config })
+  assert.ok(result.findings.some(finding => finding.file === 'leak.ts' && finding.ruleId === 'openai-key'))
+})
+
+test('real git: every explicit refspec is planned and scanned', async () => {
+  const { repo, run } = await createRepository('multiref')
+  const config = makeConfig('multiref')
+  const rules = compileRules(config)
+  fs.writeFileSync(path.join(repo, 'a.ts'), 'export const a = 1\n', 'utf8')
+  await gitOk(run, ['add', '.'])
+  await gitOk(run, ['commit', '-q', '-m', 'init'])
+  await gitOk(run, ['checkout', '-q', '-b', 'dev'])
+  const secret = 'sk-' + 'P1q2R3s4T5u6V7w8X9y0Z1a2'.slice(0, 24)
+  fs.writeFileSync(path.join(repo, 'dev-secret.ts'), `const key = "${secret}"\n`, 'utf8')
+  await gitOk(run, ['add', '.'])
+  await gitOk(run, ['commit', '-q', '-m', 'dev secret'])
+  await gitOk(run, ['checkout', '-q', 'main'])
+  await gitOk(run, ['remote', 'add', 'origin', repo])
+
+  const [op] = detectOperations({ tool: 'pwsh', args: { command: 'git push origin main dev' }, sessionCwd: repo })
+  const plan = await planPush(run, { op, config })
+  assert.equal(plan.broad, true)
+  assert.deepEqual(plan.branches.map(range => range.headRef).sort(), ['dev', 'main'])
+  const result = await scanPush(run, { plan, rules, config })
+  assert.ok(result.findings.some(finding => finding.file === 'dev-secret.ts' && finding.ruleId === 'openai-key'))
+})
+
+test('real git: detectRepo recognises a bare repository', async () => {
+  const bare = path.join(BASE, 'bare.git')
+  fs.mkdirSync(bare, { recursive: true })
+  const run = createGitRunner({ cwd: bare, timeoutMs: 20000 })
+  await gitOk(run, ['init', '-q', '--bare'])
+  const root = await detectRepo(run, bare)
+  assert.equal(typeof root, 'string')
+  assert.ok(root.length > 0)
+})
+

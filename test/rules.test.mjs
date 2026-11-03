@@ -41,6 +41,20 @@ test('detects local paths, emails and phone numbers', () => {
   assert.ok(ids('copy /home/zhangsan/.ssh/id_rsa .').includes('local-home-path-posix'))
   assert.ok(ids('mail zhangsan@example-corp.cn now').includes('email'))
   assert.ok(ids('phone 13812345678').includes('cn-mobile'))
+  assert.ok(ids('cat ' + '~/' + '.ssh/id_rsa').includes('ssh-home-path'))
+  assert.ok(ids('open ' + '\\\\\\\\' + 'fileserver\\share\\private\\x.txt').includes('local-abs-path-unc'))
+})
+
+test('detects additional token families and Chinese secret labels', () => {
+  const fineGrained = 'github_pat_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6'.slice(0, 30)
+  assert.ok(ids(fineGrained).includes('github-fine-grained-token'))
+  const gitlab = 'glpat-' + 'a1B2c3D4e5F6g7H8i9J0'.slice(0, 20)
+  assert.ok(ids(gitlab).includes('gitlab-token'))
+  assert.ok(ids('ASIA' + 'ABCDEFGHIJKLMNOP').includes('aws-access-key'))
+  assert.ok(ids('-----BEGIN PGP ' + 'PRIVATE KEY BLOCK-----').includes('private-key-block'))
+  assert.ok(ids('密' + '码：Abc123456').includes('assigned-secret-zh'))
+  const npm = 'npm_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'.slice(0, 36)
+  assert.ok(ids(npm).includes('npm-token'))
 })
 
 test('does not flag placeholder secrets or documentation examples', () => {
@@ -74,6 +88,11 @@ test('masked values never contain the complete secret', () => {
   const pathRule = findRule('local-abs-path-win')
   const maskedPath = maskValue(pathRule, 'C:\\Users\\zhangsan\\secret.txt')
   assert.ok(!maskedPath.includes('zhangsan'))
+
+  const projectPath = maskValue(pathRule, 'D:' + '\\WorkSpace\\secret-project\\config\\app.yml')
+  assert.ok(!projectPath.includes('secret-project'))
+  assert.ok(!projectPath.includes('WorkSpace'))
+  assert.ok(projectPath.endsWith('app.yml'))
 })
 
 test('identity is stable, prefix-length bounded, and value-sensitive', () => {
@@ -108,4 +127,19 @@ test('matchLine reports the matched value and index once per rule', () => {
 test('isPlaceholder accepts template and env references', () => {
   assert.equal(isPlaceholder(findRule('assigned-secret'), '${TOKEN}'), true)
   assert.equal(isPlaceholder(findRule('assigned-secret'), 'actual-value-123'), false)
+})
+
+test('long lines cannot trigger catastrophic regex backtracking', () => {
+  const started = process.hrtime.bigint()
+  const assigned = matchLine(rules, 'password=' + 'x'.repeat(200000))
+  const atHeavy = matchLine(rules, 'a@'.repeat(40000))
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6
+  assert.ok(elapsedMs < 2000, `matchLine took ${elapsedMs.toFixed(0)}ms on long lines`)
+  assert.equal(assigned.length, 0)
+  assert.equal(atHeavy.length, 0)
+})
+
+test('email rule still matches realistic addresses after bounding', () => {
+  assert.deepEqual(ids('mail zhangsan@example-corp.cn'), ['email'])
+  assert.deepEqual(ids('mail git@github.com'), [])
 })

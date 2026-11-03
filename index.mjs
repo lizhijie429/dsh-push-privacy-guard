@@ -87,6 +87,12 @@ export function apply(ctx, rawConfig) {
     log(`plugin.mounted pid=${process.pid} rules=${rules.length}`)
   } catch (error) {
     log(`plugin.error ${safeMessage(error)}`)
+    try {
+      // Surface a mount failure instead of silently disabling the guard.
+      ctx.logger?.warn?.(`push-privacy-guard disabled after mount error: ${safeMessage(error)}`)
+    } catch {
+      /* host logger is optional */
+    }
   }
 }
 

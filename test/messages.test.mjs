@@ -77,6 +77,17 @@ test('deny reasons are actionable and never contain matched values', () => {
   const failed = buildDenyReason({ action: 'push', outcome: 'scan-failed', detail: 'fatal:\nbad repo' })
   assert.match(failed, /could not complete/)
   assert.ok(!failed.includes('\n'))
+  const unresolved = buildDenyReason({
+    action: 'commit',
+    outcome: 'repo-unresolved',
+    detail: 'cwd uses an unresolved shell variable',
+  })
+  assert.match(unresolved, /repository could not be located/)
+  assert.match(unresolved, /unresolved shell variable/)
+  assert.match(unresolved, /unresolvedRepo=allow/)
+  const persistent = buildDenyReason({ action: 'push', outcome: 'persistent-shell' })
+  assert.match(persistent, /persistent terminal/)
+  assert.match(persistent, /persistentShellCommits=allow/)
 })
 
 test('describeNotes maps known and unknown notes', () => {
