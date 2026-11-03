@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Push Privacy Guard">
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 4 8 13v17c0 14.2 9.8 25.6 24 30 14.2-4.4 24-15.8 24-30V13L32 4Z" fill="url(#shield)" stroke="#0b2a6b" stroke-width="2"/>
+  <circle cx="30" cy="29" r="9.5" fill="none" stroke="#ffffff" stroke-width="3.5"/>
+  <path d="M37 36.5 45 45" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+  <rect x="26.5" y="26.5" width="7" height="6" rx="1.6" fill="#ffffff"/>
+  <path d="M28 26.5v-2a2 2 0 0 1 4 0v2" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+</svg>

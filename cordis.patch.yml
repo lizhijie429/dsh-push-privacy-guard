@@ -1,0 +1,10 @@
+# Default bundle layer for dsh-push-privacy-guard.
+# Path-mount users copy this entry into their profile's cordis.patch.yml with
+# `name` set to the absolute index.mjs path.
+- insert:
+    - id: push-privacy-guard
+      name: dsh-push-privacy-guard
+      config:
+        enabled: true
+        fullScanOnFirstPush: ask
+        whitelistOnApprove: true

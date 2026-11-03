@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Push Privacy Guard",
+    "description": "Scans commits and pushes for local paths, user info, API keys and secrets; asks for your approval before anything leaves the machine, and remembers approved items in a manageable whitelist."
+  }
+}
