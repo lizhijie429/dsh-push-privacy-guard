@@ -109,18 +109,19 @@ test('repos and reset manage repository initialization records', async () => {
 
 test('status reports configuration and counts', async () => {
   const config = makeConfig()
+  const repoRoot = path.resolve('D:/repo')
   const fakeRunner = async args => {
-    if (args.includes('--show-toplevel')) return { ok: true, code: 0, stdout: 'D:/repo\n', stderr: '' }
+    if (args.includes('--show-toplevel')) return { ok: true, code: 0, stdout: `${repoRoot}\n`, stderr: '' }
     return { ok: false, code: 1, stdout: '', stderr: 'unmocked' }
   }
   const status = await executePrivacyCommand('status', {
     config,
-    cwd: 'D:/repo',
+    cwd: repoRoot,
     createRunner: () => fakeRunner,
   })
   assert.equal(status.kind, 'success')
   assert.match(status.text, /已启用/)
-  assert.match(status.text, /当前仓库：D:[\\/]repo/)
+  assert.ok(status.text.includes(`当前仓库：${repoRoot}`))
   assert.match(status.text, /首次推送将询问全仓扫描/)
 })
 

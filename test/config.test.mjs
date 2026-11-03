@@ -26,8 +26,9 @@ test('defaults are complete and absolute paths resolve against the plugin dir', 
 test('custom relative paths resolve against the plugin dir; absolute paths stay', () => {
   const relative = normalizeConfig({ whitelistFile: 'state/custom.json' }, PLUGIN_DIR)
   assert.equal(relative.whitelistFile, path.join(PLUGIN_DIR, 'state', 'custom.json'))
-  const absolute = normalizeConfig({ whitelistFile: 'D:/shared/whitelist.json' }, PLUGIN_DIR)
-  assert.equal(absolute.whitelistFile, 'D:/shared/whitelist.json')
+  const absolutePath = process.platform === 'win32' ? 'D:/shared/whitelist.json' : '/shared/whitelist.json'
+  const absolute = normalizeConfig({ whitelistFile: absolutePath }, PLUGIN_DIR)
+  assert.equal(absolute.whitelistFile, absolutePath)
 })
 
 test('invalid enum and booleans fall back with warnings', () => {

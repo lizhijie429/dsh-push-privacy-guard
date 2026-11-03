@@ -29,9 +29,10 @@ test('detects push inside compound commands and keeps only one operation', () =>
 })
 
 test('resolves the repository directory from git -C and quoted paths', () => {
+  const absoluteRepo = process.platform === 'win32' ? 'D:/other/repo' : '/other/repo'
   assert.equal(detect('git -C backups push')[0].cwd, path.resolve(SESSION_CWD, 'backups'))
   assert.equal(detect('git -C "my repo" push')[0].cwd, path.resolve(SESSION_CWD, 'my repo'))
-  assert.equal(detect('git -C D:/other/repo push')[0].cwd, path.resolve('D:/other/repo'))
+  assert.equal(detect(`git -C ${absoluteRepo} push`)[0].cwd, path.resolve(absoluteRepo))
 })
 
 test('resolves the working directory from workdir and command-level cd', () => {
