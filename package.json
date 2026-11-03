@@ -39,5 +39,13 @@
     "git"
   ],
   "license": "MIT",
-  "author": "lizhijie429"
+  "author": "lizhijie429",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lizhijie429/dsh-push-privacy-guard.git"
+  },
+  "homepage": "https://github.com/lizhijie429/dsh-push-privacy-guard#readme",
+  "bugs": {
+    "url": "https://github.com/lizhijie429/dsh-push-privacy-guard/issues"
+  }
 }
