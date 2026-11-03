@@ -4,6 +4,8 @@
 [![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.2.1--rc.5-6f42c1)](https://github.com/deepseek-ai/deepseek-harness)
 [![Plugin Market](https://img.shields.io/badge/DSH%20Plugin%20Market-index-brightgreen)](market/index.json)
 
+简体中文 | [English](README.en.md)
+
 DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push`（以及 `gh repo sync`）**之前**检查将要进入 git 的内容，发现本地绝对路径、用户信息、API Key、私钥、连接串等敏感信息时，通过 DSH 原生审批面板请求用户一次性授权；拒绝则阻止命令，批准则放行并把本次授权的信息写入**可管理的白名单**，之后同样的信息不再重复询问。
 
 > 定位：**内容泄露护栏**，不是安全边界。它只覆盖 DSH 工具层（`pwsh` / `bash` 一次性命令，以及 PTC 内部 bash 调用）；持久终端（`terminal_send`）的 commit/push 默认直接拒绝；不覆盖人工终端推送、脚本内部自行发起的推送，也不能发现规则库之外的泄露形式。
@@ -155,7 +157,7 @@ dsh plugin --profile desktop add https://github.com/lizhijie429/dsh-push-privacy
 
 已提交的社区收录：
 
-- [Open Plugin Market（社区插件索引）收录申请 #216](https://github.com/polang233/dsh-plugin-index/issues/216)（pinned Git commit `b752f61`，v0.2.1）。
+- [Open Plugin Market（社区插件索引）收录申请 #216](https://github.com/polang233/dsh-plugin-index/issues/216)（pinned Git commit `756cc68`，v0.2.1）。
 - [awesome-dsh-plugin 精选列表 PR #11727](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/11727)（`data/plugins/lizhijie429__dsh-push-privacy-guard.yml`）。
 - [GitHub Release v0.2.1](https://github.com/lizhijie429/dsh-push-privacy-guard/releases/tag/v0.2.1)（变更说明与安装方式）。
 
