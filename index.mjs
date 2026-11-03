@@ -31,6 +31,9 @@ import { compileRules } from './lib/rules.mjs'
 /** Cordis plugin name. */
 export const name = 'push-privacy-guard'
 
+/** Loader-enforced config schema; the DSH settings form derives its fields from it. */
+export { Config } from './lib/schema.mjs'
+
 /** The tool registry is required; `commands` is used opportunistically. */
 export const inject = ['tools']
 
@@ -59,6 +62,39 @@ export function apply(ctx, rawConfig) {
 
     const rules = compileRules(config)
     const guard = createGuard({ ctx, config, rules, log })
+
+    // The loader commits `.volatile()` config changes into the running entry
+    // without remounting; refresh the normalized snapshot in place so the
+    // running guard and commands see the new switches immediately.
+    const reloadVolatileConfig = () => {
+      try {
+        const next = normalizeConfig(rawConfig, PLUGIN_DIR)
+        for (const message of next.warnings) warn(message)
+        Object.assign(config, next)
+        log(
+          `config.volatile-update enabled=${config.enabled} commit=${config.interceptCommit} push=${config.interceptPush} fullScan=${config.fullScanOnFirstPush}`,
+        )
+      } catch (error) {
+        log(`config.volatile-update-failed ${safeMessage(error)}`)
+      }
+    }
+    if (typeof ctx.on === 'function') {
+      const registerVolatileConfig = () => {
+        const off = ctx.on('loader/volatile-update', reloadVolatileConfig)
+        return () => {
+          try {
+            off?.()
+          } catch {
+            /* disposal is best effort */
+          }
+        }
+      }
+      if (typeof ctx.effect === 'function') {
+        ctx.effect(registerVolatileConfig, 'push-privacy-guard: volatile config')
+      } else {
+        registerVolatileConfig()
+      }
+    }
 
     const registerGuard = () => {
       const off = ctx.on('tools/pre-execute', guard.handler, { prepend: true })

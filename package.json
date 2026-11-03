@@ -1,6 +1,6 @@
 {
   "name": "dsh-push-privacy-guard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DSH Host plugin: privacy-check git commit / push (and gh repo sync) before upload; asks the user through the DSH approval UI and keeps approved items in a manageable whitelist.",
   "type": "module",
   "main": "index.mjs",
@@ -13,6 +13,7 @@
   "files": [
     "index.mjs",
     "lib",
+    "vendor",
     "locale",
     "icon.svg",
     "cordis.patch.yml",

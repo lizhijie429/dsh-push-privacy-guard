@@ -13,7 +13,8 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 - **用户授权**：命中未白名单项时调用 `ctx.approval.request()`，在 Web UI 审批面板展示脱敏后的命中清单；批准 = 本次放行 + 入白名单，拒绝/取消 = 阻止命令。
 - **白名单管理**：`/privacy-guard` 斜杠命令（用户专属，不产生模型消息），底层 `state/whitelist.json` 可手改、即时生效。
 - **失败关闭**：一旦识别为 commit/push，扫描失败/超时/git 查询失败/无法获得授权都会**阻止**命令，而不是放行；`git commit`/`git push` 无法定位仓库时默认拒绝（`unresolvedRepo`）。
-- 零运行时依赖（仅 `node:*` 内置模块），可按绝对路径挂载，也可作为 bundle 安装。
+- **原生配置 schema**：`index.mjs` 导出 Cordis `Config`（Schemastery），加载时由 DSH 校验；开关、模式、上限与路径字段标记为 `.volatile()`，可在 DSH 设置页直接修改并**热生效**（loader 提交后插件原地刷新配置，不重启）。
+- 零运行时依赖（仅 `node:*` 内置模块；Schemastery 按 MIT 许可内嵌在 `vendor/`），可按绝对路径挂载，也可作为 bundle 安装。
 
 ## 工作原理
 
@@ -104,6 +105,8 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 
 ## 配置（profile `cordis.patch.yml` 的 `config:`）
 
+配置由 `lib/schema.mjs` 导出的 Cordis `Config`（Schemastery）校验：非法枚举/类型会在加载时报错，不再静默回退。带 `.volatile()` 的字段会出现在 DSH 设置页表单中（设置页只投影 `volatile` 字段）；编辑后 loader 直接提交新值并触发 `loader/volatile-update`，插件原地刷新配置，**无需重启**。数组/对象类字段（`disableRules`、`extraRules`、`ignorePaths`）仍通过 `cordis.patch.yml` 修改，由 profile 重载生效。
+
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `true` | 总开关 |
@@ -191,3 +194,5 @@ CI：`.github/workflows/test.yml` 在 `ubuntu-latest` / `windows-latest`（Node 
 ## License
 
 MIT，见 [LICENSE](LICENSE)。
+
+`vendor/schemastery` 与 `vendor/cosmokit` 内嵌自 DeepSeek Harness 运行时的 `@deepseek-ai/schemastery` / `@deepseek-ai/cosmokit`（MIT，许可证随目录保留），用于让按绝对路径挂载的外部插件也能声明 DSH 原生 `Config` schema。

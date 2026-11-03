@@ -34,6 +34,10 @@ test('resolves the repository directory from git -C and quoted paths', () => {
   assert.equal(detect('git -C backups push')[0].cwd, path.resolve(SESSION_CWD, 'backups'))
   assert.equal(detect('git -C "my repo" push')[0].cwd, path.resolve(SESSION_CWD, 'my repo'))
   assert.equal(detect(`git -C ${absoluteRepo} push`)[0].cwd, path.resolve(absoluteRepo))
+  if (process.platform === 'win32') {
+    const windowsPath = 'C:\\Users\\tester path\\.dsh\\plugins\\guard'
+    assert.equal(detect(`git -C "${windowsPath}" push`)[0].cwd, path.win32.normalize(windowsPath))
+  }
 })
 
 test('resolves the working directory from workdir and command-level cd', () => {
