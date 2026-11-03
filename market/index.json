@@ -1,0 +1,55 @@
+{
+  "format": 1,
+  "title": {
+    "en": "DSH Privacy Guard",
+    "zh": "DSH 提交推送隐私检查"
+  },
+  "description": {
+    "en": "Community plugin index for dsh-push-privacy-guard.",
+    "zh": "dsh-push-privacy-guard 的社区插件索引。"
+  },
+  "metadata": {},
+  "plugins": [
+    {
+      "name": "dsh-push-privacy-guard",
+      "title": {
+        "en": "Push Privacy Guard",
+        "zh": "推送隐私检查"
+      },
+      "description": {
+        "en": "Checks git commit and push for local paths, user information, API keys and secrets before upload; blocks unapproved content, asks the user through the DSH approval UI, and keeps approved items in a manageable whitelist.",
+        "zh": "提交/推送前扫描本地路径、用户信息、API Key、私钥等敏感信息；未授权内容不会上传，命中时通过 DSH 审批面板请求一次性授权，授权项进入可管理的白名单。"
+      },
+      "icon": "https://raw.githubusercontent.com/lizhijie429/dsh-push-privacy-guard/main/icon.svg",
+      "author": "lizhijie429",
+      "homepage": "https://github.com/lizhijie429/dsh-push-privacy-guard#readme",
+      "repository": {
+        "url": "https://github.com/lizhijie429/dsh-push-privacy-guard"
+      },
+      "metadata": {
+        "keywords": [
+          "privacy",
+          "secret scanning",
+          "git",
+          "security",
+          "commit",
+          "push"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.2.1",
+          "publishTimestamp": 1793716296,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lizhijie429/dsh-push-privacy-guard",
+            "commit": "b752f613609a0f285d5c6306c65c14f647323c40"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-0 <0.3.0"
+          }
+        }
+      ]
+    }
+  ]
+}

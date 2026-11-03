@@ -1,5 +1,9 @@
 # dsh-push-privacy-guard
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.2.1--rc.5-6f42c1)](https://github.com/deepseek-ai/deepseek-harness)
+[![Plugin Market](https://img.shields.io/badge/DSH%20Plugin%20Market-index-brightgreen)](market/index.json)
+
 DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push`（以及 `gh repo sync`）**之前**检查将要进入 git 的内容，发现本地绝对路径、用户信息、API Key、私钥、连接串等敏感信息时，通过 DSH 原生审批面板请求用户一次性授权；拒绝则阻止命令，批准则放行并把本次授权的信息写入**可管理的白名单**，之后同样的信息不再重复询问。
 
 > 定位：**内容泄露护栏**，不是安全边界。它只覆盖 DSH 工具层（`pwsh` / `bash` 一次性命令，以及 PTC 内部 bash 调用）；持久终端（`terminal_send`）的 commit/push 默认直接拒绝；不覆盖人工终端推送、脚本内部自行发起的推送，也不能发现规则库之外的泄露形式。
@@ -132,6 +136,29 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 | `gitTimeoutMs` | 20000 | 单条 git 命令超时 |
 
 非法值回退默认并写 `config.warning` 日志，不会静默失效。
+
+## 社区收录 / 插件市场
+
+可通过 DSH「插件 → 发现」添加本插件自带的**市场索引**（格式 1，由 `@deepseek-ai/dsh-plugin-market-index` 的 `parseMarketIndex` 校验）：
+
+```text
+https://raw.githubusercontent.com/lizhijie429/dsh-push-privacy-guard/main/market/index.json
+```
+
+步骤：先启用实验性的 **自定义插件市场**（插件 → 实验性插件 → 更多 → 自定义插件市场），再在 插件 → 发现 → 索引源 中粘贴上面的 URL，搜索 “Push Privacy Guard” 安装即可。
+
+也可以直接用 Git 源安装（无需 npm 发布）：
+
+```powershell
+dsh plugin --profile desktop add https://github.com/lizhijie429/dsh-push-privacy-guard
+```
+
+已提交的社区收录：
+
+- [Open Plugin Market（社区插件索引）](https://github.com/polang233/dsh-plugin-index) 收录申请（pinned Git commit `b752f61`，v0.2.1）。
+- [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 精选列表 PR（`data/plugins/lizhijie429__dsh-push-privacy-guard.yml`）。
+
+> npm 包尚未发布（需要维护者 npm token）；当前以固定 Git commit 作为市场安装源。索引条目只声明安装参数，实际安装内容以仓库 `package.json` 与 `cordis.patch.yml` 为准。
 
 ## 安装
 
