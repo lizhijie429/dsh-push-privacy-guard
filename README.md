@@ -150,7 +150,7 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 
 ## 图形化设置页
 
-在 DSH **Web GUI** 打开 **设置（Settings）→ 隐私检查**，即可使用插件自带的图形页面（客户端 bundle 注册为 `settings.section`）：
+在 DSH 客户端（Web GUI / 桌面客户端）打开 **设置（Settings）→ 隐私检查**，即可使用插件自带的图形页面（客户端 bundle 注册为 `settings.section`）：
 
 - **运行状态**：启用/禁用、审批作用域、全局/项目/最近拦截数量、白名单文件路径。
 - **插件配置**：开关、首次全仓扫描、审批策略、项目白名单信任等字段可直接编辑；保存通过 DSH `configEditor` 写入 profile，`volatile` 字段热生效，无需重启。
@@ -161,8 +161,9 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 路由与安全：
 
 - 页面由 DSH Web 服务器在 `/privacy-guard/settings` 提供，API 在 `/privacy-guard/api`；仅当 `webServer` 绑定**回环地址**时注册，LAN 绑定会跳过并记录日志。
+- **桌面客户端（Electron）同样可用**：客户端通过 `dsh-app://app` 协议把非静态请求转发到本地 Host（`forwardWebRequest`），所以设置 section 的 iframe 与 API 调用都会走本地 Host；无需另开浏览器。
 - 所有 API 请求要求每进程随机 token（内嵌于页面）并校验同源 Origin；页面仅展示掩码/哈希，不返回明文。
-- 也可直接在浏览器打开 `http://<GUI 地址>/privacy-guard/settings`（例如 `http://127.0.0.1:30740/privacy-guard/settings`）；Electron 桌面壳通过 `file://` 加载，可能没有该 HTTP 路由，此时请用命令/对话方式。
+- Web GUI 也可直接在浏览器打开 `http://<GUI 地址>/privacy-guard/settings`（例如 `http://127.0.0.1:30740/privacy-guard/settings`）；桌面客户端请从「设置 → 隐私检查」进入。
 
 ## 配置（profile `cordis.patch.yml` 的 `config:`）
 

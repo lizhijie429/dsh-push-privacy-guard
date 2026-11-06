@@ -150,7 +150,7 @@ Besides the slash commands, the plugin registers a model-facing `privacy_guard` 
 
 ## Graphical settings page
 
-Open **Settings → Privacy Guard** in the DSH Web GUI to use the plugin's graphical page (a client bundle registering a `settings.section`):
+Open **Settings → Privacy Guard** in the DSH client (Web GUI or desktop client) to use the plugin's graphical page (a client bundle registering a `settings.section`):
 
 - **Status**: enabled state, approval scope, global/project/pending counts and whitelist file paths.
 - **Plugin configuration**: toggles, first-push scan, approval policy and project-whitelist trust are editable; saving goes through the DSH `configEditor` into the profile, and `volatile` fields apply live without a restart.
@@ -161,8 +161,9 @@ Open **Settings → Privacy Guard** in the DSH Web GUI to use the plugin's graph
 Routing and security:
 
 - The page is served at `/privacy-guard/settings` and the API at `/privacy-guard/api`; routes are registered only when the DSH `webServer` binds a **loopback** address (LAN binds are skipped and logged).
+- **Desktop (Electron) is supported too**: the client forwards non-static requests to the local Host through the `dsh-app://app` protocol (`forwardWebRequest`), so the settings iframe and API calls use the local Host without opening a separate browser.
 - Every API request needs a per-process random token embedded in the page and a same-origin Origin check; the page shows masked values and hashes only, never plaintext.
-- You can also open `http://<GUI host>/privacy-guard/settings` directly (for example `http://127.0.0.1:30740/privacy-guard/settings`); the Electron shell loads over `file://` and may not expose this HTTP route, in which case use commands/conversation.
+- In the Web GUI you can also open `http://<GUI host>/privacy-guard/settings` directly (for example `http://127.0.0.1:30740/privacy-guard/settings`); in the desktop client use Settings → Privacy Guard.
 
 ## Configuration (the `config:` block of `cordis.patch.yml`)
 
