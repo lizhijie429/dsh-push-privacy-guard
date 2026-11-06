@@ -218,3 +218,43 @@ test('pending, session allow and project allow scopes work through commands', as
   assert.equal(revoke.kind, 'success')
   assert.equal(sessionEntries('cmd-session').length, 0)
 })
+
+test('status reports approval scope and the project whitelist', async () => {
+  const config = makeConfig()
+  const repo = fs.mkdtempSync(path.join(ROOT, 'status-repo-'))
+  const fakeRunner = async args => {
+    if (args.join(' ').includes('--show-toplevel')) return { ok: true, stdout: `${repo}\n`, stderr: '' }
+    if (args.join(' ').includes('--git-dir')) return { ok: false, stdout: '', stderr: '' }
+    return { ok: false, stdout: '', stderr: '' }
+  }
+  const result = await executePrivacyCommand('status', { config, cwd: repo, sessionId: 'status-session', createRunner: () => fakeRunner })
+  assert.equal(result.kind, 'success')
+  assert.match(result.text, /作用域=global/)
+  assert.match(result.text, /privacy-guard-whitelist\.json/)
+  assert.match(result.text, /项目白名单：启用/)
+})
+
+test('project clear removes project entries', async () => {
+  const config = makeConfig()
+  const repo = fs.mkdtempSync(path.join(ROOT, 'clear-repo-'))
+  fs.mkdirSync(path.join(repo, '.dsh'), { recursive: true })
+  fs.writeFileSync(
+    path.join(repo, '.dsh/privacy-guard-whitelist.json'),
+    JSON.stringify({ version: 1, entries: [{ id: '9999999999999999', rule: 'email', allowed: true }] }),
+  )
+  const fakeRunner = async args => {
+    if (args.join(' ').includes('--show-toplevel')) return { ok: true, stdout: `${repo}\n`, stderr: '' }
+    return { ok: false, stdout: '', stderr: '' }
+  }
+  const result = await executePrivacyCommand('project clear', { config, cwd: repo, sessionId: 's', createRunner: () => fakeRunner })
+  assert.equal(result.kind, 'success')
+  assert.equal(JSON.parse(fs.readFileSync(path.join(repo, '.dsh/privacy-guard-whitelist.json'), 'utf8')).entries.length, 0)
+})
+
+test('session scope refuses commands without a session id', async () => {
+  const config = makeConfig()
+  rememberPending('no-session-test', [{ identity: '1212121212121212', ruleId: 'email', masked: 'a***@b.c', file: 'a.ts' }])
+  const result = await executePrivacyCommand('allow last session', { config, cwd: 'D:/repo' })
+  assert.equal(result.kind, 'error')
+  assert.match(result.text, /会话 id/)
+})

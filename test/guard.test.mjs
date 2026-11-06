@@ -135,7 +135,7 @@ function execFor(command) {
   return {
     name: 'pwsh',
     callId: 'call-1',
-    agent: { session: { header: { cwd: 'D:/repo' } } },
+    agent: { session: { id: 'guard-session', header: { cwd: 'D:/repo' } } },
     signal: new AbortController().signal,
     arguments: { command },
   }
@@ -602,4 +602,33 @@ test('a project revoke entry overrides a globally approved identity', async () =
   const { guard } = makeGuard({ ctx, config, runner })
   const decision = await guard.handler(execFor('git commit -m x'), async () => ({ kind: 'allow' }))
   assert.equal(decision.kind, 'deny')
+})
+
+test('the approval prompt names the approval scope and project file', async () => {
+  const root = fs.mkdtempSync(path.join(ROOT, 'scope-prompt-'))
+  const secret = 'sk-' + 'H1j2K3l4M5n6O7p8Q9r0S1t2'.slice(0, 24)
+  const config = makeConfig({ approvalScope: 'project' })
+  const { ctx, requests } = makeCtx({ outcomes: ['rejected'] })
+  const runner = fakeGit([
+    { match: contains('rev-parse', '--show-toplevel'), result: ok(`${root}\n`) },
+    { match: args => args[0] === 'rev-parse' && args.includes('--verify'), result: ok(`${HEAD}\n`) },
+    { match: args => args[0] === 'diff', result: ok(patchFor('a.ts', 1, [`const key = "${secret}"`])) },
+  ])
+  const { guard } = makeGuard({ ctx, config, runner })
+  await guard.handler(execFor('git commit -m x'), async () => ({ kind: 'allow' }))
+  const request = requests[0]
+  assert.match(request.displayReason.zh, /项目级白名单/)
+  assert.match(request.displayReason.en, /project whitelist/)
+  assert.match(request.displayReason.en, /privacy-guard-whitelist\.json/)
+})
+
+test('session approvals fail closed when the host exposes no session id', async () => {
+  const config = makeConfig({ approvalScope: 'session' })
+  const secret = 'sk-' + 'T1u2V3w4X5y6Z7a8B9c0D1e2'.slice(0, 24)
+  const { ctx, requests } = makeCtx({ outcomes: ['allowed-once'] })
+  const { guard } = makeGuard({ ctx, config, runner: commitRunner({ diff: patchFor('a.ts', 1, [`const key = "${secret}"`]) }) })
+  const noSession = { ...execFor('git commit -m x'), agent: { session: { header: { cwd: 'D:/repo' } } } }
+  assert.equal((await guard.handler(noSession, async () => ({ kind: 'allow' }))).kind, 'allow')
+  assert.equal((await guard.handler(noSession, async () => ({ kind: 'allow' }))).kind, 'allow')
+  assert.equal(requests.length, 2)
 })

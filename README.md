@@ -17,7 +17,8 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 - **dry-run 放行**：`git push --dry-run` / `git push -n` 不上传任何内容，直接放行、不打扰。
 - **首次仓库全仓扫描**：某个仓库第一次通过 DSH 推送时询问一次「是否先全仓库扫描」；全仓扫描用 `--full-tree` 覆盖整个 `HEAD` 的 **git 已跟踪文件**，`.gitignore` 忽略的内容天然不参与。之后该仓库只检查本次提交/推送内容。
 - **用户授权**：命中未白名单项时调用 `ctx.approval.request()`，在 Web UI 审批面板展示脱敏后的命中清单；批准 = 本次放行 + 入白名单，拒绝/取消 = 阻止命令。
-- **白名单管理（全局 / 项目 / 会话三级）**：授权项可记住到全局 `state/whitelist.json`、仓库内项目白名单 `.dsh/privacy-guard-whitelist.json`（项目级优先，可含 `allowed: false` 撤销全局授权），或仅当前会话（内存，重启即失效）。`/privacy-guard` 斜杠命令与对话内 `privacy_guard` 工具都可管理，写操作需用户审批。
+- **白名单管理（全局 / 项目 / 会话三级）**：授权项可记住到全局 `state/whitelist.json`、仓库内项目白名单 `.dsh/privacy-guard-whitelist.json`（项目级优先，可含 `allowed: false` 撤销全局授权），或仅当前会话（内存，重启即失效）。`/privacy-guard` 斜杠命令与对话内 `privacy_guard` 工具都可管理，写操作需用户审批；工具拒绝放行 pending 之外的条目，且审批面板会展示规则/掩码/文件/id。
+- **项目白名单安全**：项目文件必须位于仓库根目录内（拒绝 `..` 与符号链接路径逃逸）；`trustProjectWhitelist: false` 可忽略仓库自带的放行条目；`projectWhitelistEnabled: false` 可整体关闭项目级白名单。
 - **失败关闭**：一旦识别为 commit/push，扫描失败/超时/git 查询失败/无法获得授权都会**阻止**命令，而不是放行；`git commit`/`git push` 无法定位仓库时默认拒绝（`unresolvedRepo`）。
 - **原生配置 schema**：`index.mjs` 导出 Cordis `Config`（Schemastery），加载时由 DSH 校验；开关、模式、上限与路径字段标记为 `.volatile()`，可在 DSH 设置页直接修改并**热生效**（loader 提交后插件原地刷新配置，不重启）。
 - 零运行时依赖（仅 `node:*` 内置模块；Schemastery 按 MIT 许可内嵌在 `vendor/`），可按绝对路径挂载，也可作为 bundle 安装。
@@ -102,7 +103,7 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 | 项目 `project` | 仓库内 `.dsh/privacy-guard-whitelist.json`（`projectWhitelistFile` 可改） | 仅该仓库；**项目级优先于全局级**：项目条目的 `allowed: false` 会撤销全局/会话的授权 |
 | 会话 `session` | 进程内存（`sessionId` 维度） | 仅当前会话；DSH 重启或插件重载后失效 |
 
-`scan`/`guard` 每次检查都按"全局 ∪ 项目允许 ∪ 会话允许 − 项目撤销"计算有效白名单。项目白名单文件可提交到仓库与团队共享（只含哈希与掩码，无明文）；不想共享就把它加入 `.gitignore`。
+`scan`/`guard` 每次检查都按"全局 ∪ 项目允许 ∪ 会话允许 − 项目撤销"计算有效白名单。项目白名单文件可提交到仓库与团队共享（只含哈希与掩码，无明文）；不想共享就把它加入 `.gitignore`。项目文件必须实际位于仓库根目录内，符号链接或 `..` 越界路径会被忽略并记录警告；如果不想信任仓库自带的放行条目，设置 `trustProjectWhitelist: false`。
 
 项目白名单示例：
 
@@ -125,7 +126,7 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 | `/privacy-guard allow <id前缀\|last> [global\|project\|session]` | 放行命中，默认写入 `approvalScope` 指定的作用域 |
 | `/privacy-guard revoke <id前缀> [global\|project\|session]` | 撤销某个作用域的放行 |
 | `/privacy-guard session [list\|allow <id\|last>\|revoke <id>\|clear]` | 仅当前会话有效的放行 |
-| `/privacy-guard project [list\|allow <id\|last>\|revoke <id>]` | 当前仓库的项目级放行（优先于全局） |
+| `/privacy-guard project [list\|allow <id\|last>\|revoke <id>\|clear]` | 当前仓库的项目级放行（优先于全局） |
 | `/privacy-guard remove <id前缀>` | 删除全局白名单单条（前缀需唯一） |
 | `/privacy-guard clear confirm` | 清空全局白名单（必须带 `confirm`） |
 | `/privacy-guard status` | 开关、文件路径、规则数、白名单数、已初始化仓库数、当前仓库状态 |
@@ -142,7 +143,7 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 
 - `action: "pending"`：列出最近被拦截的命中（只含 id 哈希、规则、掩码、文件，不含明文）；
 - `action: "list"` / `"status"`：查看三级白名单与当前生效开关；
-- `action: "allow" | "revoke"` + `scope: "session" | "project" | "global"` + `target: "<id前缀|last>"`：修改放行配置。
+- `action: "allow" | "revoke"` + `scope: "session" | "project" | "global"` + `target: "<id前缀|last>"`：修改放行配置；`target` 必须来自最近一次被拦截的 `pending` 命中（`last` 表示全部），不能放行任意未知 id。审批面板会展示规则、掩码、文件和 identity，用户核对后才写入。
 
 **每次 `allow`/`revoke` 都会再弹一次 DSH 审批**，由用户确认后才写入；在审批策略为 `never` 或审批不可用时，工具会失败关闭、不修改任何配置，因此模型无法静默自我授权。会话级条目只存在内存中，项目级写入仓库 `.dsh/privacy-guard-whitelist.json`，全局级写入 `state/whitelist.json`。
 
@@ -159,7 +160,9 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 | `unresolvedRepo` | `deny` | 识别出 commit/push 但仓库定位失败（变量路径、非仓库、`GIT_DIR` 覆盖等）时：`deny` / `allow` |
 | `persistentShellCommits` | `deny` | `terminal_send` 等持久终端的 commit/push（无法获知其真实 cwd）：`deny` / `allow` |
 | `approvalScope` | `global` | 审批通过后写入哪个作用域：`global` / `project` / `session` |
-| `projectWhitelistFile` | `.dsh/privacy-guard-whitelist.json` | 项目级白名单文件（相对仓库根目录，或绝对路径） |
+| `projectWhitelistFile` | `.dsh/privacy-guard-whitelist.json` | 项目级白名单文件（相对仓库根目录；`false` 等价于禁用） |
+| `projectWhitelistEnabled` | `true` | 是否启用项目级白名单 |
+| `trustProjectWhitelist` | `true` | 是否信任仓库内项目白名单的放行条目；关闭后只应用项目撤销条目 |
 | `whitelistOnApprove` | `true` | 授权后自动写白名单 |
 | `requireApprovalOnIncompleteScan` | `true` | 扫描不完整（超时/超限/大文件跳过/动态提交信息）时是否要求授权 |
 | `disableRules` | `[]` | 关闭的内置规则 id |
@@ -257,8 +260,9 @@ CI：`.github/workflows/test.yml` 在 `ubuntu-latest` / `windows-latest`（Node 
 - **`git commit -C/-c/--fixup` 复用的旧提交信息**在 commit 阶段不重扫（push 阶段通常兜底；`interceptPush:false` 时属残余风险）。
 - **规则库不是万能**：高熵字符串、自定义内部格式、二进制内容可能漏报；规则可配置但与任何正则方案一样存在误报/漏报。
 - **白名单文件即信任边界**：能写 `state/whitelist.json`、项目白名单文件或直接调用审批服务的主体（Full access 会话中的模型、其他插件、把 state 指到 workspace 的配置）可以预置白名单实现“自我授权”；请把全局 state 放在用户目录并限制写权限。`privacy_guard` 工具本身每次写操作都要用户审批，但审批服务仍按会话策略工作。
-- **项目白名单文件可能被提交**：它只含哈希与掩码，可安全共享；若不想让团队看到放行清单，把 `.dsh/` 加入 `.gitignore`。
-- **会话级放行只存在内存**：DSH 重启或插件重载后失效；需要跨会话就写项目级或全局级。
+- **会话级放行只存在内存**：DSH 重启或插件重载后失效；需要跨会话就写项目级或全局级。DSH 无法提供稳定 session id 时会话级操作失败关闭，不会退回共享桶。
+- **项目白名单文件可能被提交**：它只含哈希与掩码，可安全共享；若不想让团队看到放行清单，把 `.dsh/` 加入 `.gitignore`。仓库自带的 `allowed:true` 条目默认被信任，可用 `trustProjectWhitelist: false` 忽略。
+- **审批面板必须能展示细节**：工具和 guard 的审批会列出规则/掩码/文件/id；若宿主只显示简略原因，请以 `/privacy-guard pending` 的输出核对后再批准。
 - **多进程并发写白名单**只在单进程内串行；同时运行多个 DSH 进程时可能相互覆盖。
 - **不清理仓库**：插件只负责阻止/放行，不会自动删除已提交的敏感信息或改写历史。
 

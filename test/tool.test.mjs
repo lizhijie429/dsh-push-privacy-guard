@@ -93,3 +93,33 @@ test('registerPrivacyTool uses the host tool registry', () => {
   assert.equal(registered.length, 1)
   assert.equal(registered[0].name, 'privacy_guard')
 })
+
+test('unknown identities are rejected instead of becoming manual allows', async () => {
+  const ctx = makeCtx()
+  const tool = createPrivacyTool({ ctx, config })
+  const value = await tool.execute({ action: 'allow', scope: 'session', target: 'deadbeefdeadbeef' }, exec)
+  assert.equal(value.ok, false)
+  assert.match(value.text, /pending/)
+  assert.equal(ctx.requests.length, 0)
+})
+
+test('the approval prompt shows masked items, rule and file', async () => {
+  const ctx = makeCtx(['allowed-once'])
+  const tool = createPrivacyTool({ ctx, config })
+  const value = await tool.execute({ action: 'allow', scope: 'session', target: 'last' }, exec)
+  assert.equal(value.ok, true)
+  const request = ctx.requests[0]
+  assert.match(request.displayReason.zh, /openai-key/)
+  assert.match(request.displayReason.zh, /sk-c…34/)
+  assert.match(request.displayReason.zh, /a.ts/)
+})
+
+test('session mutations fail closed without a session id', async () => {
+  const ctx = makeCtx()
+  const tool = createPrivacyTool({ ctx, config })
+  const noSession = { ...exec, agent: { session: { header: { cwd: DIR } } } }
+  const value = await tool.execute({ action: 'allow', scope: 'session', target: 'last' }, noSession)
+  assert.equal(value.ok, false)
+  assert.match(value.text, /session id/)
+  assert.equal(ctx.requests.length, 0)
+})

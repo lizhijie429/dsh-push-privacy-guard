@@ -17,7 +17,8 @@ A DSH (DeepSeek Harness) Host plugin that checks what is about to enter git **be
 - **Dry-run pass-through**: `git push --dry-run` / `git push -n` upload nothing, so they are allowed without friction.
 - **First-push full scan**: the first push from a repository asks once whether to scan the whole tracked tree. The full scan uses `--full-tree`, covering all **git-tracked files in `HEAD`**; anything ignored by `.gitignore` is naturally excluded. Afterwards only the current commit/push content is checked.
 - **User approval**: when unapproved items are found, calls `ctx.approval.request()` and shows a masked list in the Web UI approval panel. Approve = allow this command + add to the whitelist; reject/cancel = block the command.
-- **Whitelist management (global / project / session)**: approvals can be remembered globally in `state/whitelist.json`, per repository in `.dsh/privacy-guard-whitelist.json` (project entries override global; `allowed: false` revokes a global approval for that repository), or only for the current session (in-memory, cleared by a restart). Both the `/privacy-guard` slash command and the conversation-facing `privacy_guard` tool can manage them; write operations require user approval.
+- **Whitelist management (global / project / session)**: approvals can be remembered globally in `state/whitelist.json`, per repository in `.dsh/privacy-guard-whitelist.json` (project entries override global; `allowed: false` revokes a global approval for that repository), or only for the current session (in-memory, cleared by a restart). Both the `/privacy-guard` slash command and the conversation-facing `privacy_guard` tool can manage them; write operations require user approval, the tool only allows items from `pending`, and the approval prompt shows rule/masked/file/id.
+- **Project whitelist safety**: the project file must stay inside the repository root (`..` and symlink escapes are rejected); `trustProjectWhitelist: false` ignores repository-authored allow entries; `projectWhitelistEnabled: false` disables project scope entirely.
 - **Fail closed**: once a commit/push is recognised, scan errors, timeouts, failed git queries and unavailable approval all **block** the command instead of allowing it. When the repository cannot be located for a `git commit`/`git push`, the default is to deny (`unresolvedRepo`).
 - **Native config schema**: `index.mjs` exports a Cordis `Config` (Schemastery) validated by DSH at load time. Switches, modes, limits and path fields are marked `.volatile()`, so they can be edited in the DSH settings page and take effect **live** (the loader commits the new values and the plugin refreshes its config in place, without a restart).
 - Zero runtime dependencies (Node `node:*` built-ins only; Schemastery is vendored under `vendor/` with its MIT license). It can be mounted by absolute path or installed as a bundle.
@@ -102,7 +103,7 @@ Filtering: placeholders such as `${…}`, `{{…}}`, `<…>`, `your_*`, `changem
 | `project` | `.dsh/privacy-guard-whitelist.json` in the repository (`projectWhitelistFile` changes the path) | this repository only; **project overrides global**: an entry with `allowed: false` revokes a global/session approval here |
 | `session` | process memory, keyed by session id | the current session only; cleared when DSH restarts or the plugin reloads |
 
-Every scan computes the effective whitelist as “global ∪ project allow ∪ session allow − project revoke”. The project file can be committed and shared with the team (it contains hashes and masked previews only); add `.dsh/` to `.gitignore` if you do not want to share it.
+Every scan computes the effective whitelist as “global ∪ project allow ∪ session allow − project revoke”. The project file can be committed and shared with the team (it contains hashes and masked previews only); add `.dsh/` to `.gitignore` if you do not want to share it. The file must physically live inside the repository root: symbolic links and `..` escapes are ignored with a warning. Set `trustProjectWhitelist: false` if you do not trust repository-authored allow entries.
 
 Example project whitelist:
 
@@ -125,7 +126,7 @@ Example project whitelist:
 | `/privacy-guard allow <id-prefix\|last> [global\|project\|session]` | Allow a finding in the given scope (default `approvalScope`) |
 | `/privacy-guard revoke <id-prefix> [global\|project\|session]` | Revoke an allow decision in that scope |
 | `/privacy-guard session [list\|allow <id\|last>\|revoke <id>\|clear]` | Session-scoped decisions |
-| `/privacy-guard project [list\|allow <id\|last>\|revoke <id>]` | Project-scoped decisions (priority over global) |
+| `/privacy-guard project [list\|allow <id\|last>\|revoke <id>\|clear]` | Project-scoped decisions (priority over global) |
 | `/privacy-guard remove <id-prefix>` | Remove one global entry (unique prefix) |
 | `/privacy-guard clear confirm` | Clear the global whitelist (requires `confirm`) |
 | `/privacy-guard status` | Switches, file paths, rule count, whitelist count, initialised repo count, current repo state |
@@ -142,7 +143,7 @@ Besides the slash commands, the plugin registers a model-facing `privacy_guard` 
 
 - `action: "pending"` — list the findings of the most recent blocked command (id hash, rule, masked preview, file; never plaintext);
 - `action: "list"` / `"status"` — inspect the three whitelists and the effective switches;
-- `action: "allow"` / `"revoke"` with `scope: "session" | "project" | "global"` and `target: "<id-prefix|last>"` — change an allow decision.
+- `action: "allow"` / `"revoke"` with `scope: "session" | "project" | "global"` and `target: "<id-prefix|last>"` — change an allow decision. `target` must come from the most recent `pending` findings (`last` means all of them); arbitrary unknown ids are rejected. The approval panel shows rule, masked preview, file and identity so the user can verify before granting.
 
 **Every `allow`/`revoke` triggers a fresh DSH approval request** and only writes after the user approves. With the `never` policy or an unavailable approval channel the tool fails closed and changes nothing, so a model cannot silently widen its own permissions. Session entries live only in memory, project entries are written to the repository's `.dsh/privacy-guard-whitelist.json`, and global entries go to `state/whitelist.json`.
 
@@ -159,7 +160,9 @@ Configuration is validated by the Cordis `Config` (Schemastery) exported from `l
 | `unresolvedRepo` | `deny` | Policy when a commit/push is recognised but the repository cannot be located (variable path, not a repo, `GIT_DIR` override, …): `deny` / `allow` |
 | `persistentShellCommits` | `deny` | Commits/pushes in a persistent terminal (`terminal_send`, real cwd unknown): `deny` / `allow` |
 | `approvalScope` | `global` | Scope an approval is remembered in: `global` / `project` / `session` |
-| `projectWhitelistFile` | `.dsh/privacy-guard-whitelist.json` | Project whitelist file (relative to the repository root, or absolute) |
+| `projectWhitelistFile` | `.dsh/privacy-guard-whitelist.json` | Project whitelist file (relative to the repository root; `false` disables project scope) |
+| `projectWhitelistEnabled` | `true` | Enable project-scoped whitelists |
+| `trustProjectWhitelist` | `true` | Trust repository-authored project allow entries; when false only project revoke entries apply |
 | `whitelistOnApprove` | `true` | Add approved items to the whitelist automatically |
 | `requireApprovalOnIncompleteScan` | `true` | Require approval when the scan is incomplete (timeout / limits / skipped large files / dynamic commit messages) |
 | `disableRules` | `[]` | Built-in rule ids to disable |
@@ -257,8 +260,9 @@ End-to-end (requires the session approval policy to be `ask`, i.e. an approval p
 - **Messages reused by `git commit -C/-c/--fixup`** are not re-scanned at commit time (the push scan usually covers them; with `interceptPush: false` this is a residual risk).
 - **The rule set is not omniscient**: high-entropy strings, custom internal formats and binary content may be missed; rules are configurable and, like any regex approach, can produce both false positives and false negatives.
 - **The whitelist files are the trust boundary**: any principal that can write `state/whitelist.json` or a project whitelist file, or call the approval service directly (a model in a full-access session, another plugin, a configuration that points state at the workspace), can pre-seed entries and “self-authorise”. Keep the global state in the user directory and restrict write permissions. The `privacy_guard` tool itself requires user approval for every write, but approvals still follow the session policy.
-- **A project whitelist file may be committed**: it contains hashes and masked previews only, so it is safe to share; add `.dsh/` to `.gitignore` if you do not want the team to see the allow list.
-- **Session decisions are in-memory only**: they are lost when DSH restarts or the plugin reloads; use project or global scope for durable decisions.
+- **A project whitelist file may be committed**: it contains hashes and masked previews only, so it is safe to share; add `.dsh/` to `.gitignore` if you do not want the team to see the allow list. Repository-authored `allowed:true` entries are trusted by default; set `trustProjectWhitelist: false` to ignore them.
+- **Session decisions are in-memory only**: they are lost when DSH restarts or the plugin reloads; use project or global scope for durable decisions. When the host exposes no stable session id, session operations fail closed instead of sharing a bucket.
+- **Approval prompts must expose details**: guard and tool approvals list rule/masked/file/id; if the host renders only the short reason, verify with `/privacy-guard pending` before approving.
 - **Concurrent whitelist writes across processes** are only serialised within one process; running several DSH processes at once can overwrite each other.
 - **The plugin does not clean repositories**: it only blocks/allows; it never deletes already-committed sensitive data or rewrites history.
 
