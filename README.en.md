@@ -1,7 +1,7 @@
 # dsh-push-privacy-guard
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.2.1--rc.5-6f42c1)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.2.2--rc.1-6f42c1)](https://github.com/deepseek-ai/deepseek-harness)
 [![Plugin Market](https://img.shields.io/badge/DSH%20Plugin%20Market-index-brightgreen)](market/index.json)
 
 [简体中文](README.md) | English
@@ -18,6 +18,7 @@ A DSH (DeepSeek Harness) Host plugin that checks what is about to enter git **be
 - **First-push full scan**: the first push from a repository asks once whether to scan the whole tracked tree. The full scan uses `--full-tree`, covering all **git-tracked files in `HEAD`**; anything ignored by `.gitignore` is naturally excluded. Afterwards only the current commit/push content is checked.
 - **User approval**: when unapproved items are found, calls `ctx.approval.request()` and shows a masked list in the Web UI approval panel. Approve = allow this command + add to the whitelist; reject/cancel = block the command.
 - **Whitelist management (global / project / session)**: approvals can be remembered globally in `state/whitelist.json`, per repository in `.dsh/privacy-guard-whitelist.json` (project entries override global; `allowed: false` revokes a global approval for that repository), or only for the current session (in-memory, cleared by a restart). Both the `/privacy-guard` slash command and the conversation-facing `privacy_guard` tool can manage them; write operations require user approval, the tool only allows items from `pending`, and the approval prompt shows rule/masked/file/id.
+- **Graphical settings page**: a dedicated page under **Settings → Privacy Guard** in the DSH Web GUI shows runtime status, live-editable plugin configuration, global/project whitelists and recent blocked findings; it supports one-click allow-to-global/project, removal and clearing without commands or hand-editing JSON.
 - **Project whitelist safety**: the project file must stay inside the repository root (`..` and symlink escapes are rejected); `trustProjectWhitelist: false` ignores repository-authored allow entries; `projectWhitelistEnabled: false` disables project scope entirely.
 - **Fail closed**: once a commit/push is recognised, scan errors, timeouts, failed git queries and unavailable approval all **block** the command instead of allowing it. When the repository cannot be located for a `git commit`/`git push`, the default is to deny (`unresolvedRepo`).
 - **Native config schema**: `index.mjs` exports a Cordis `Config` (Schemastery) validated by DSH at load time. Switches, modes, limits and path fields are marked `.volatile()`, so they can be edited in the DSH settings page and take effect **live** (the loader commits the new values and the plugin refreshes its config in place, without a restart).
@@ -147,6 +148,22 @@ Besides the slash commands, the plugin registers a model-facing `privacy_guard` 
 
 **Every `allow`/`revoke` triggers a fresh DSH approval request** and only writes after the user approves. With the `never` policy or an unavailable approval channel the tool fails closed and changes nothing, so a model cannot silently widen its own permissions. Session entries live only in memory, project entries are written to the repository's `.dsh/privacy-guard-whitelist.json`, and global entries go to `state/whitelist.json`.
 
+## Graphical settings page
+
+Open **Settings → Privacy Guard** in the DSH Web GUI to use the plugin's graphical page (a client bundle registering a `settings.section`):
+
+- **Status**: enabled state, approval scope, global/project/pending counts and whitelist file paths.
+- **Plugin configuration**: toggles, first-push scan, approval policy and project-whitelist trust are editable; saving goes through the DSH `configEditor` into the profile, and `volatile` fields apply live without a restart.
+- **Recent blocked findings**: rule, masked preview, file and identity, with one-click allow-to-global/project.
+- **Global / project whitelists**: tables with id/rule/masked/file, removal and clearing; the project tab takes a repository path and manages `.dsh/privacy-guard-whitelist.json`.
+- Session-scoped allow decisions still belong to a conversation (the page has no session context); use the `privacy_guard` tool or `/privacy-guard session`.
+
+Routing and security:
+
+- The page is served at `/privacy-guard/settings` and the API at `/privacy-guard/api`; routes are registered only when the DSH `webServer` binds a **loopback** address (LAN binds are skipped and logged).
+- Every API request needs a per-process random token embedded in the page and a same-origin Origin check; the page shows masked values and hashes only, never plaintext.
+- You can also open `http://<GUI host>/privacy-guard/settings` directly (for example `http://127.0.0.1:30740/privacy-guard/settings`); the Electron shell loads over `file://` and may not expose this HTTP route, in which case use commands/conversation.
+
 ## Configuration (the `config:` block of `cordis.patch.yml`)
 
 Configuration is validated by the Cordis `Config` (Schemastery) exported from `lib/schema.mjs`: invalid enums/types fail at load time instead of silently falling back. Fields marked `.volatile()` appear in the DSH settings form (the settings page projects only `volatile` fields); after an edit the loader commits the new values and emits `loader/volatile-update`, and the plugin refreshes its config in place — **no restart needed**. Array/object fields (`disableRules`, `extraRules`, `ignorePaths`) are still edited in `cordis.patch.yml` and take effect when the profile reloads.
@@ -199,9 +216,9 @@ dsh plugin --profile desktop add https://github.com/lizhijie429/dsh-push-privacy
 
 Community listings submitted:
 
-- [Open Plugin Market (community plugin index) listing request #216](https://github.com/polang233/dsh-plugin-index/issues/216) (pinned Git commit `756cc68`, v0.2.1).
+- [Open Plugin Market (community plugin index) listing request #216](https://github.com/polang233/dsh-plugin-index/issues/216) (pinned Git commit/version is kept up to date in the issue).
 - [awesome-dsh-plugin curated list PR #11727](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/11727) (`data/plugins/lizhijie429__dsh-push-privacy-guard.yml`).
-- [GitHub Release v0.2.1](https://github.com/lizhijie429/dsh-push-privacy-guard/releases/tag/v0.2.1) (changelog and install instructions).
+- [GitHub Releases](https://github.com/lizhijie429/dsh-push-privacy-guard/releases) (latest version, changelog and install instructions).
 
 > The npm package is not published yet (it needs the maintainer's npm token); the market entry currently pins a Git commit. An index entry declares install parameters only; what is actually installed is determined by the repository's `package.json` and `cordis.patch.yml`.
 

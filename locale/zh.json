@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "推送隐私检查",
-    "description": "DSH 提交/推送隐私检查：在 git commit、git push 前扫描本地路径、用户信息、API Key、私钥等敏感信息，未授权内容不会上传，授权项进入可管理的掩码白名单；支持原生 DSH 配置热更新、首次推送全仓扫描与 fail-closed。"
+    "description": "DSH 提交/推送隐私检查：在 git commit、git push 前扫描本地路径、用户信息、API Key、私钥等敏感信息，未授权内容不会上传，授权项进入可管理的掩码白名单；支持原生 DSH 配置热更新、图形化设置页、首次推送全仓扫描与 fail-closed。"
   }
 }

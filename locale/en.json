@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Push Privacy Guard",
-    "description": "Git commit/push privacy guard for DSH: scans the content about to enter git for local paths, user info, API keys, private keys and secrets, asks for one-time approval, and keeps a masked whitelist. Native DSH Config with live settings, first-push full-repository scan, fail-closed."
+    "description": "Git commit/push privacy guard for DSH: scans the content about to enter git for local paths, user info, API keys, private keys and secrets, asks for one-time approval, and keeps a masked whitelist. Native DSH Config with live settings, a graphical Settings page for whitelists, first-push full-repository scan, fail-closed."
   }
 }

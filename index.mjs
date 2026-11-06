@@ -29,6 +29,7 @@ import { createLog } from './lib/log.mjs'
 import { compileRules } from './lib/rules.mjs'
 import { sessionIdOf } from './lib/scopes.mjs'
 import { registerPrivacyTool } from './lib/tool.mjs'
+import { registerSettingsWeb } from './lib/settings-api.mjs'
 
 /** Cordis plugin name. */
 export const name = 'push-privacy-guard'
@@ -131,6 +132,8 @@ export function apply(ctx, rawConfig) {
     } else {
       registerTool()
     }
+
+    registerSettingsWeb(ctx, { config, rules, log })
 
     if (typeof ctx.effect === 'function') {
       ctx.effect(() => () => log('plugin.disposed'), 'push-privacy-guard: lifecycle')

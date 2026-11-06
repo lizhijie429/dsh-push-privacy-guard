@@ -1,7 +1,7 @@
 # dsh-push-privacy-guard
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.2.1--rc.5-6f42c1)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.2.2--rc.1-6f42c1)](https://github.com/deepseek-ai/deepseek-harness)
 [![Plugin Market](https://img.shields.io/badge/DSH%20Plugin%20Market-index-brightgreen)](market/index.json)
 
 简体中文 | [English](README.en.md)
@@ -18,6 +18,7 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 - **首次仓库全仓扫描**：某个仓库第一次通过 DSH 推送时询问一次「是否先全仓库扫描」；全仓扫描用 `--full-tree` 覆盖整个 `HEAD` 的 **git 已跟踪文件**，`.gitignore` 忽略的内容天然不参与。之后该仓库只检查本次提交/推送内容。
 - **用户授权**：命中未白名单项时调用 `ctx.approval.request()`，在 Web UI 审批面板展示脱敏后的命中清单；批准 = 本次放行 + 入白名单，拒绝/取消 = 阻止命令。
 - **白名单管理（全局 / 项目 / 会话三级）**：授权项可记住到全局 `state/whitelist.json`、仓库内项目白名单 `.dsh/privacy-guard-whitelist.json`（项目级优先，可含 `allowed: false` 撤销全局授权），或仅当前会话（内存，重启即失效）。`/privacy-guard` 斜杠命令与对话内 `privacy_guard` 工具都可管理，写操作需用户审批；工具拒绝放行 pending 之外的条目，且审批面板会展示规则/掩码/文件/id。
+- **图形化设置页**：DSH Web GUI 的「设置 → 隐私检查」内置图形页面，集中展示运行状态、可热更新的插件配置、全局/项目白名单和最近拦截；支持一键放行到全局或项目、删除/清空白名单，无需记命令或手改 JSON。
 - **项目白名单安全**：项目文件必须位于仓库根目录内（拒绝 `..` 与符号链接路径逃逸）；`trustProjectWhitelist: false` 可忽略仓库自带的放行条目；`projectWhitelistEnabled: false` 可整体关闭项目级白名单。
 - **失败关闭**：一旦识别为 commit/push，扫描失败/超时/git 查询失败/无法获得授权都会**阻止**命令，而不是放行；`git commit`/`git push` 无法定位仓库时默认拒绝（`unresolvedRepo`）。
 - **原生配置 schema**：`index.mjs` 导出 Cordis `Config`（Schemastery），加载时由 DSH 校验；开关、模式、上限与路径字段标记为 `.volatile()`，可在 DSH 设置页直接修改并**热生效**（loader 提交后插件原地刷新配置，不重启）。
@@ -147,6 +148,22 @@ DSH（DeepSeek Harness）Host 插件：在 Agent 执行 `git commit`、`git push
 
 **每次 `allow`/`revoke` 都会再弹一次 DSH 审批**，由用户确认后才写入；在审批策略为 `never` 或审批不可用时，工具会失败关闭、不修改任何配置，因此模型无法静默自我授权。会话级条目只存在内存中，项目级写入仓库 `.dsh/privacy-guard-whitelist.json`，全局级写入 `state/whitelist.json`。
 
+## 图形化设置页
+
+在 DSH **Web GUI** 打开 **设置（Settings）→ 隐私检查**，即可使用插件自带的图形页面（客户端 bundle 注册为 `settings.section`）：
+
+- **运行状态**：启用/禁用、审批作用域、全局/项目/最近拦截数量、白名单文件路径。
+- **插件配置**：开关、首次全仓扫描、审批策略、项目白名单信任等字段可直接编辑；保存通过 DSH `configEditor` 写入 profile，`volatile` 字段热生效，无需重启。
+- **最近拦截**：展示最近被拦截的规则、掩码、文件与 identity，可一键放行到全局或项目。
+- **全局 / 项目白名单**：表格展示 id/规则/掩码/文件，支持删除、清空；项目页填写仓库路径后加载并管理 `.dsh/privacy-guard-whitelist.json`。
+- 会话级放行仍需在对话中管理（设置页没有会话上下文），使用 `privacy_guard` 工具或 `/privacy-guard session`。
+
+路由与安全：
+
+- 页面由 DSH Web 服务器在 `/privacy-guard/settings` 提供，API 在 `/privacy-guard/api`；仅当 `webServer` 绑定**回环地址**时注册，LAN 绑定会跳过并记录日志。
+- 所有 API 请求要求每进程随机 token（内嵌于页面）并校验同源 Origin；页面仅展示掩码/哈希，不返回明文。
+- 也可直接在浏览器打开 `http://<GUI 地址>/privacy-guard/settings`（例如 `http://127.0.0.1:30740/privacy-guard/settings`）；Electron 桌面壳通过 `file://` 加载，可能没有该 HTTP 路由，此时请用命令/对话方式。
+
 ## 配置（profile `cordis.patch.yml` 的 `config:`）
 
 配置由 `lib/schema.mjs` 导出的 Cordis `Config`（Schemastery）校验：非法枚举/类型会在加载时报错，不再静默回退。带 `.volatile()` 的字段会出现在 DSH 设置页表单中（设置页只投影 `volatile` 字段）；编辑后 loader 直接提交新值并触发 `loader/volatile-update`，插件原地刷新配置，**无需重启**。数组/对象类字段（`disableRules`、`extraRules`、`ignorePaths`）仍通过 `cordis.patch.yml` 修改，由 profile 重载生效。
@@ -199,9 +216,9 @@ dsh plugin --profile desktop add https://github.com/lizhijie429/dsh-push-privacy
 
 已提交的社区收录：
 
-- [Open Plugin Market（社区插件索引）收录申请 #216](https://github.com/polang233/dsh-plugin-index/issues/216)（pinned Git commit `756cc68`，v0.2.1）。
+- [Open Plugin Market（社区插件索引）收录申请 #216](https://github.com/polang233/dsh-plugin-index/issues/216)（固定 Git commit 与版本以 issue 内更新为准）。
 - [awesome-dsh-plugin 精选列表 PR #11727](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/11727)（`data/plugins/lizhijie429__dsh-push-privacy-guard.yml`）。
-- [GitHub Release v0.2.1](https://github.com/lizhijie429/dsh-push-privacy-guard/releases/tag/v0.2.1)（变更说明与安装方式）。
+- [GitHub Releases](https://github.com/lizhijie429/dsh-push-privacy-guard/releases)（最新版本、变更说明与安装方式）。
 
 > npm 包尚未发布（需要维护者 npm token）；当前以固定 Git commit 作为市场安装源。索引条目只声明安装参数，实际安装内容以仓库 `package.json` 与 `cordis.patch.yml` 为准。
 
