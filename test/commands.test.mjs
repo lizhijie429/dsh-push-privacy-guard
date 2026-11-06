@@ -6,6 +6,7 @@ import { normalizeConfig } from '../lib/config.mjs'
 import { executePrivacyCommand } from '../lib/commands.mjs'
 import { clearWhitelist, loadWhitelist } from '../lib/whitelist.mjs'
 import { loadRepoState, markInitialized } from '../lib/repo-state.mjs'
+import { rememberPending, sessionEntries } from '../lib/scopes.mjs'
 
 const ROOT = fs.mkdtempSync(path.join(import.meta.dirname, '.test-tmp-commands-'))
 after(() => {
@@ -170,4 +171,50 @@ test('scan reports a helpful error outside a git repository', async () => {
   })
   assert.equal(result.kind, 'error')
   assert.match(result.text, /不在 git 仓库内/)
+})
+
+test('pending, session allow and project allow scopes work through commands', async () => {
+  const config = makeConfig()
+  const identity = 'a1b2c3d4e5f60718'
+  rememberPending('cmd-session', [
+    { identity, ruleId: 'openai-key', label: 'OpenAI API Key', masked: 'sk-a…34', file: 'src/config.ts' },
+  ])
+
+  const pending = await executePrivacyCommand('pending', { config, cwd: 'D:/repo', sessionId: 'cmd-session' })
+  assert.equal(pending.kind, 'success')
+  assert.match(pending.text, /a1b2c3d4e5f60718/)
+
+  const allowSession = await executePrivacyCommand('allow last session', {
+    config,
+    cwd: 'D:/repo',
+    sessionId: 'cmd-session',
+  })
+  assert.equal(allowSession.kind, 'success')
+  assert.equal(sessionEntries('cmd-session')[0].id, identity)
+
+  const list = await executePrivacyCommand('list', { config, cwd: 'D:/repo', sessionId: 'cmd-session' })
+  assert.match(list.text, /会话白名单：1 条/)
+
+  const repo = fs.mkdtempSync(path.join(ROOT, 'project-command-'))
+  const fakeRunner = async args => {
+    if (args.join(' ').includes('--show-toplevel')) return { ok: true, stdout: `${repo}\n`, stderr: '' }
+    return { ok: false, stdout: '', stderr: '' }
+  }
+  rememberPending('cmd-project', [
+    { identity: 'bbbbbbbbbbbbbbbb', ruleId: 'email', label: '邮箱地址', masked: 'z***@x.cn', file: 'b.ts' },
+  ])
+  const allowProject = await executePrivacyCommand('project allow last', {
+    config,
+    cwd: repo,
+    sessionId: 'cmd-project',
+    createRunner: () => fakeRunner,
+  })
+  assert.equal(allowProject.kind, 'success')
+  const projectFile = path.join(repo, '.dsh', 'privacy-guard-whitelist.json')
+  assert.equal(fs.existsSync(projectFile), true)
+  assert.equal(JSON.parse(fs.readFileSync(projectFile, 'utf8')).entries[0].id, 'bbbbbbbbbbbbbbbb')
+
+  const revoke = await executePrivacyCommand('session revoke a1b2', { config, cwd: 'D:/repo', sessionId: 'cmd-session' })
+  assert.equal(revoke.kind, 'success')
+  assert.equal(sessionEntries('cmd-session').length, 0)
 })

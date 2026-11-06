@@ -27,6 +27,8 @@ import { createGitRunner } from './lib/git.mjs'
 import { createGuard, resolveSessionCwd } from './lib/guard.mjs'
 import { createLog } from './lib/log.mjs'
 import { compileRules } from './lib/rules.mjs'
+import { sessionIdOf } from './lib/scopes.mjs'
+import { registerPrivacyTool } from './lib/tool.mjs'
 
 /** Cordis plugin name. */
 export const name = 'push-privacy-guard'
@@ -116,6 +118,20 @@ export function apply(ctx, rawConfig) {
 
     registerCommands(ctx, config, log)
 
+    const registerTool = () => {
+      try {
+        return registerPrivacyTool(ctx, { config, log })
+      } catch (error) {
+        log(`tool.register-failed ${safeMessage(error)}`)
+        return () => {}
+      }
+    }
+    if (typeof ctx.effect === 'function') {
+      ctx.effect(registerTool, 'push-privacy-guard: privacy_guard tool')
+    } else {
+      registerTool()
+    }
+
     if (typeof ctx.effect === 'function') {
       ctx.effect(() => () => log('plugin.disposed'), 'push-privacy-guard: lifecycle')
     }
@@ -148,6 +164,7 @@ function registerCommands(ctx, config, log) {
             executePrivacyCommand(rawInput, {
               config,
               cwd: resolveSessionCwd(ctx, agent?.session),
+              sessionId: sessionIdOf(agent),
               createRunner: options => createGitRunner({ cwd: options?.cwd, timeoutMs: config.gitTimeoutMs }),
             }),
         })

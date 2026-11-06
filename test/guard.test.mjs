@@ -538,3 +538,68 @@ test('gh repo sync outside a repository is allowed (it needs no local checkout)'
   assert.equal(nextCalled, 1)
   assert.ok(logLines.some(line => line.includes('reason=no-local-repo')))
 })
+
+test('approvalScope=project writes the repository whitelist and reuses it', async () => {
+  const root = fs.mkdtempSync(path.join(ROOT, 'project-repo-'))
+  const secret = 'sk-' + 'Q1w2E3r4T5y6U7i8O9p0A1s2'.slice(0, 24)
+  const config = makeConfig({ approvalScope: 'project' })
+  const { ctx, requests } = makeCtx({ outcomes: ['allowed-once'] })
+  const runner = fakeGit([
+    { match: contains('rev-parse', '--show-toplevel'), result: ok(`${root}\n`) },
+    { match: args => args[0] === 'rev-parse' && args.includes('--verify'), result: ok(`${HEAD}\n`) },
+    { match: args => args[0] === 'diff', result: ok(patchFor('a.ts', 1, [`const key = "${secret}"`])) },
+  ])
+  const { guard } = makeGuard({ ctx, config, runner })
+  const first = await guard.handler(execFor('git commit -m x'), async () => ({ kind: 'allow' }))
+  assert.equal(first.kind, 'allow')
+  const projectFile = path.join(root, '.dsh', 'privacy-guard-whitelist.json')
+  assert.equal(fs.existsSync(projectFile), true)
+  const document = JSON.parse(fs.readFileSync(projectFile, 'utf8'))
+  assert.equal(document.entries.length, 1)
+  assert.equal(document.entries[0].source, 'project')
+
+  const second = await guard.handler(execFor('git commit -m x'), async () => ({ kind: 'allow' }))
+  assert.equal(second.kind, 'allow')
+  assert.equal(requests.length, 1)
+})
+
+test('approvalScope=session remembers only inside the session', async () => {
+  const config = makeConfig({ approvalScope: 'session' })
+  const secret = 'sk-' + 'R1e2W3q4A5s6D7f8G9h0J1k2'.slice(0, 24)
+  const { ctx, requests } = makeCtx({ outcomes: ['allowed-once'] })
+  const { guard } = makeGuard({ ctx, config, runner: commitRunner({ diff: patchFor('a.ts', 1, [`const key = "${secret}"`]) }) })
+  const first = await guard.handler(execFor('git commit -m x'), async () => ({ kind: 'allow' }))
+  assert.equal(first.kind, 'allow')
+  const second = await guard.handler(execFor('git commit -m x'), async () => ({ kind: 'allow' }))
+  assert.equal(second.kind, 'allow')
+  assert.equal(requests.length, 1)
+  // Nothing was written to the global whitelist.
+  assert.equal(loadWhitelist(config.whitelistFile).entries.length, 0)
+})
+
+test('a project revoke entry overrides a globally approved identity', async () => {
+  const root = fs.mkdtempSync(path.join(ROOT, 'project-deny-'))
+  const secret = 'sk-' + 'S1d2F3g4H5j6K7l8Z9x0C1v2'.slice(0, 24)
+  const config = makeConfig()
+  const identity = identityOf('openai-key', secret)
+  await addApproved(config.whitelistFile, [
+    { identity, ruleId: 'openai-key', label: 'OpenAI API Key', masked: 'sk-S…12', file: 'a.ts' },
+  ])
+  fs.mkdirSync(path.join(root, '.dsh'), { recursive: true })
+  fs.writeFileSync(
+    path.join(root, '.dsh', 'privacy-guard-whitelist.json'),
+    JSON.stringify({
+      version: 1,
+      entries: [{ id: identity, rule: 'openai-key', label: 'OpenAI API Key', masked: 'sk-S…12', allowed: false }],
+    }),
+  )
+  const runner = fakeGit([
+    { match: contains('rev-parse', '--show-toplevel'), result: ok(`${root}\n`) },
+    { match: args => args[0] === 'rev-parse' && args.includes('--verify'), result: ok(`${HEAD}\n`) },
+    { match: args => args[0] === 'diff', result: ok(patchFor('a.ts', 1, [`const key = "${secret}"`])) },
+  ])
+  const { ctx } = makeCtx({ outcomes: ['rejected'] })
+  const { guard } = makeGuard({ ctx, config, runner })
+  const decision = await guard.handler(execFor('git commit -m x'), async () => ({ kind: 'allow' }))
+  assert.equal(decision.kind, 'deny')
+})
