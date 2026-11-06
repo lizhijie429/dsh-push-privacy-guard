@@ -40,12 +40,12 @@
                                      },
                         "versions":  [
                                          {
-                                             "version":  "0.3.1",
-                                             "publishTimestamp":  1793966370,
+                                             "version":  "0.4.0",
+                                             "publishTimestamp":  1793968373,
                                              "source":  {
                                                             "type":  "git",
                                                             "url":  "https://github.com/lizhijie429/dsh-push-privacy-guard",
-                                                            "commit":  "f5b936929eddf5dd655bde4256193a2c326caa1c"
+                                                            "commit":  "8e135f7a172503540e233770394231468d527ccb"
                                                         },
                                              "engines":  {
                                                              "dsh":  "\u003e=0.2.1-0 \u003c0.3.0"
