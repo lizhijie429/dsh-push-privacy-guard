@@ -224,7 +224,7 @@ Get-Content state\push-privacy-guard.log -Tail 20
 4. **图形化设置页**：DSH 客户端（Web GUI / 桌面客户端）**设置 → 隐私检查**。页面提供服务状态、可热更新的插件配置、最近拦截一键放行、全局/项目白名单增删清空；项目页输入仓库路径后管理项目文件。桌面客户端通过 `dsh-app://app` 协议把请求转发到本地 Host，无需另开浏览器。Web GUI 也可直接访问 `http://<GUI 地址>/privacy-guard/settings`。
 5. **手动编辑文件**：`state/whitelist.json`、项目白名单文件可手工维护（只支持掩码/identity），修改后立即生效；项目路径必须位于仓库根内。
 
-图形化设置页的 API（`/privacy-guard/api`）要求每进程随机 token 和同源 Origin，仅当 Host `webServer` 绑定回环地址时注册；页面不返回明文。页面上的配置保存经 DSH `configEditor` 写入 profile，`volatile` 字段热生效；会话级放行因页面无会话上下文，仍在命令/对话中完成。
+图形化设置页与 API 都会先经过宿主 `connection.admit()` 认证（Host/Origin 栅栏 + 签名浏览器/API cookie）：未认证请求直接返回 401，不会拿到页面或操作 token；认证通过后页面内还要求每进程随机 token 才可修改白名单/配置。路由仅当 Host `webServer` 绑定回环地址时注册；页面不返回明文。配置保存经 DSH `configEditor` 写入 profile，`volatile` 字段热生效；会话级放行因页面无会话上下文，仍在命令/对话中完成。
 
 ## 已知限制
 
@@ -241,7 +241,7 @@ Get-Content state\push-privacy-guard.log -Tail 20
 - **会话级放行仅内存**：DSH 重启/插件重载后失效；宿主无法提供稳定 session id 时会话操作失败关闭，不会退回共享桶。
 - **多进程并发写白名单**：全局/项目白名单只在单进程内串行；同时运行多个 DSH 进程可能相互覆盖。
 - **不清理仓库**：插件只负责阻止/放行，不会删除已提交的敏感信息或改写历史。
-- **图形化设置页**：仅在 Host `webServer` 绑定回环地址时注册；非回环绑定会跳过（避免 LAN 暴露）。桌面客户端依赖 `dsh-app://app` 转发；若客户端 bundle 未加载，重启 DSH 或使用命令/对话。
+- **图形化设置页**：仅在 Host `webServer` 绑定回环地址时注册；非回环绑定会跳过（避免 LAN 暴露）。页面与 API 需先通过宿主 `connection.admit()` 认证，未认证请求返回 401 且不会返回操作 token。桌面客户端依赖 `dsh-app://app` 转发；若客户端 bundle 未加载，重启 DSH 或使用命令/对话。
 - **i18n 与测试**：命令/工具回复目前为中文硬编码，未接入 DSH locale；CI 只覆盖 Node 单元/集成测试，未在真实 DSH 进程内自动化验证审批 UI；vendored Schemastery 为 3.18.5，宿主为 3.19.0。
 
 ## License

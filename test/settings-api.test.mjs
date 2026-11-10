@@ -45,7 +45,7 @@ function makeConfig() {
   )
 }
 
-function makeCtx(edits = []) {
+function makeCtx(edits = [], { authenticated = true } = {}) {
   return {
     get(name) {
       if (name === 'configEditor') {
@@ -56,6 +56,11 @@ function makeCtx(edits = []) {
         }
       }
       if (name === 'webServer') return { protocol: 'http:' }
+      if (name === 'connection') {
+        return {
+          admit: () => (authenticated ? { peer: { id: 'test-peer' } } : { rejection: 401 }),
+        }
+      }
       return undefined
     },
     fiber: { entry: { id: 'push-privacy-guard' } },
@@ -199,7 +204,7 @@ test('the settings API allows only pending items and projects must resolve to a 
 })
 
 test('the standalone page embeds the token and the API endpoint', async () => {
-  const page = createPageHandler({ token: AUTH, config: makeConfig() })
+  const page = createPageHandler({ ctx: makeCtx(), token: AUTH, config: makeConfig() })
   const response = await new Promise((resolve, reject) => {
     let payload = ''
     let status = 0
@@ -253,6 +258,7 @@ test('routes register only on a loopback web server', async () => {
             return () => {}
           },
         },
+        connection: { admit: () => ({ peer: { id: 'route-test' } }) },
         effect(fn) { fn() },
       })
     },
@@ -265,4 +271,21 @@ test('routes register only on a loopback web server', async () => {
   routes.length = 0
   registerSettingsWeb(makeCtx('0.0.0.0'), { config, rules: [], log: () => {} })
   assert.equal(routes.length, 0)
+})
+test('the settings page and API reject requests that lack Host connection authentication', async () => {
+  const config = makeConfig()
+  const unauthenticated = makeCtx([], { authenticated: false })
+  const handler = createApiHandler({ ctx: unauthenticated, config, rules: [], token: AUTH })
+  const api = await invoke(handler, { headers: { 'x-privacy-guard-token': AUTH } })
+  assert.equal(api.status, 401)
+
+  const page = createPageHandler({ ctx: unauthenticated, token: AUTH, config })
+  const response = await invoke(page, { url: '/privacy-guard/settings' })
+  assert.equal(response.status, 401)
+  assert.ok(!response.body.includes(AUTH))
+
+  const noConnection = makeCtx([], { authenticated: true })
+  noConnection.get = name => (name === 'webServer' ? { protocol: 'http:' } : undefined)
+  const noConnectionApi = createApiHandler({ ctx: noConnection, config, rules: [], token: AUTH })
+  assert.equal((await invoke(noConnectionApi, { headers: { 'x-privacy-guard-token': AUTH } })).status, 401)
 })

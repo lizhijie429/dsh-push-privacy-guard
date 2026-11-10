@@ -224,7 +224,7 @@ The plugin talks to the user through these surfaces; all of them show masked val
 4. **Graphical Settings page**: DSH client (Web GUI or desktop client) **Settings → Privacy Guard**. It shows runtime status, live-editable plugin configuration, recent blocked findings with one-click allow-to-global/project, and global/project whitelist tables (remove/clear). The project tab takes a repository path and manages its project file. The desktop client forwards requests to the local Host through the `dsh-app://app` protocol, so no separate browser is needed. In the Web GUI you can also open `http://<GUI host>/privacy-guard/settings`.
 5. **Manual file editing**: `state/whitelist.json` and project whitelist files may be edited by hand (masked/identity entries only) and apply immediately; project paths must stay inside the repository root.
 
-The settings API (`/privacy-guard/api`) requires a per-process random token and a same-origin Origin, and routes are registered only when the Host `webServer` binds a loopback address; the page never returns plaintext. Configuration saves go through the DSH `configEditor` into the profile and apply live for `volatile` fields. Session-scoped allow decisions still belong to a conversation because the settings page has no session context.
+The graphical settings page and API first pass the host's `connection.admit()` authentication (Host/Origin fence + signed browser/API cookie): unauthenticated requests get 401 and never receive the page or its operation token; once authenticated, a per-process token is still required before changing whitelists or configuration. Routes are registered only when the Host `webServer` binds loopback; the page never returns plaintext. Configuration saves go through the DSH `configEditor` into the profile and apply live for `volatile` fields. Session-scoped allow decisions still belong to a conversation because the settings page has no session context.
 
 ## Known limitations
 
@@ -241,7 +241,7 @@ The settings API (`/privacy-guard/api`) requires a per-process random token and 
 - **Session decisions are in-memory only**: they are lost when DSH restarts or the plugin reloads; when the host exposes no stable session id, session operations fail closed instead of sharing a bucket.
 - **Concurrent multi-process writes** are only serialised inside one process; running several DSH processes at once can overwrite each other's whitelist changes.
 - **The plugin does not clean repositories**: it only blocks/allows; it never deletes already-committed sensitive data or rewrites history.
-- **Graphical settings page**: registered only when Host `webServer` binds loopback (non-loopback binds are skipped to avoid LAN exposure). The desktop client relies on `dsh-app://app` forwarding; if the client bundle is not loaded, restart DSH or use commands/conversation.
+- **Graphical settings page**: registered only when Host `webServer` binds loopback (non-loopback binds are skipped to avoid LAN exposure). The page and API first require host `connection.admit()` authentication; unauthenticated requests get 401 and never receive the operation token. The desktop client relies on `dsh-app://app` forwarding; if the client bundle is not loaded, restart DSH or use commands/conversation.
 - **i18n and tests**: command/tool replies are currently hard-coded Chinese and do not use the DSH locale; CI covers Node unit/integration tests but not automated approval-UI validation inside a real DSH process. Vendored Schemastery is 3.18.5 while the host is 3.19.0.
 
 ## License
